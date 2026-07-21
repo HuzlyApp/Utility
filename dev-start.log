@@ -1,0 +1,17 @@
+﻿
+> candidate-match-analyzer@1.0.0 start
+> next start
+
+  Γû▓ Next.js 14.2.15
+  - Local:        http://localhost:3210
+
+ Γ£ô Starting...
+node.exe :  ΓÜá Disabling SWC Minifer will not be an option in the next major version. Please report any issues you 
+may be experiencing to https://github.com/vercel/next.js/issues
+At C:\nvm4w\nodejs\npm.ps1:29 char:3
++   & $NODE_EXE $NPM_CLI_JS $args
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( ΓÜá Disabling .../next.js/issues:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+ Γ£ô Ready in 498ms

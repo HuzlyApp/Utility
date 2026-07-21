@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "neon": {
+      "type": "http",
+      "url": "https://mcp.neon.tech/mcp",
+      "env": {
+        "NEON_API_KEY": "${NEON_API_KEY}"
+      }
+    }
+  }
+}
