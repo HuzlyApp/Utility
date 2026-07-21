@@ -2,16 +2,25 @@
 > candidate-match-analyzer@1.0.0 start
 > next start
 
-  Γû▓ Next.js 14.2.15
-  - Local:        http://localhost:3210
-
- Γ£ô Starting...
-node.exe :  ΓÜá Disabling SWC Minifer will not be an option in the next major version. Please report any issues you 
-may be experiencing to https://github.com/vercel/next.js/issues
+node.exe :  Γ¿» Failed to start server
 At C:\nvm4w\nodejs\npm.ps1:29 char:3
 +   & $NODE_EXE $NPM_CLI_JS $args
 +   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    + CategoryInfo          : NotSpecified: ( ΓÜá Disabling .../next.js/issues:String) [], RemoteException
+    + CategoryInfo          : NotSpecified: ( Γ¿» Failed to start server:String) [], RemoteException
     + FullyQualifiedErrorId : NativeCommandError
  
- Γ£ô Ready in 498ms
+Error: listen EADDRINUSE: address already in use :::3210
+    at Server.setupListenHandle [as _listen2] (node:net:1907:16)
+    at listenInCluster (node:net:1964:12)
+    at Server.listen (node:net:2066:7)
+    at C:\Users\carli\Documents\Utility\node_modules\next\dist\server\lib\start-server.js:280:16
+    at new Promise (<anonymous>)
+    at startServer (C:\Users\carli\Documents\Utility\node_modules\next\dist\server\lib\start-server.js:191:11)
+    at Module.nextStart (C:\Users\carli\Documents\Utility\node_modules\next\dist\cli\next-start.js:25:40)
+    at C:\Users\carli\Documents\Utility\node_modules\next\dist\bin\next:105:856 {
+  code: 'EADDRINUSE',
+  errno: -4091,
+  syscall: 'listen',
+  address: '::',
+  port: 3210
+}
