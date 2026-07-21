@@ -158,6 +158,9 @@ export interface StructuredJobFields {
   education_requirements?: string;
   program_accreditation_requirements?: string;
   additional_submission_restrictions?: string;
+  // Structured free-text requirement lists captured in the workspace form.
+  mandatory_requirements?: string;
+  preferred_requirements?: string;
 }
 
 export interface VerifiedRecruiterInputs {
