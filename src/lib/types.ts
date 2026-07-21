@@ -113,7 +113,8 @@ export const DISPLAY_ACTION: Record<RecommendedAction, string> = {
   CALL_AND_VERIFY: "Call and Verify",
   KEEP_AS_POSSIBLE: "Keep as Possible",
   REDIRECT_TO_OTHER_JOB: "Redirect to Other Job",
-  STOP_FOR_THIS_JOB: "Stop for This Job",
+  // A missing/unverified résumé must not read as "stop"; recommend verification.
+  STOP_FOR_THIS_JOB: "Verify Before Decision",
 };
 
 export const DISPLAY_DISPOSITION: Record<RecruiterDisposition, string> = {

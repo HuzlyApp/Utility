@@ -9,7 +9,7 @@ import {
   ShieldIcon,
 } from "@/components/ui/icons";
 import { EvidenceBlock } from "./evidence-block";
-import { requirementVisual } from "./status";
+import { requirementVisual, recruiterActionFor } from "./status";
 import type { AiRequirement, AiScreeningQuestion } from "@/lib/schema";
 
 export interface VerificationEntry {
@@ -118,10 +118,11 @@ export function QualificationTable({
         </div>
 
         {/* Desktop column header */}
-        <div className="hidden grid-cols-[1fr,110px,130px] gap-3 border-b border-slate-100 px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid">
+        <div className="hidden grid-cols-[1fr,100px,120px,150px] gap-3 border-b border-slate-100 px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 md:grid">
           <span>Requirement</span>
           <span>Type</span>
           <span>Status</span>
+          <span>Recruiter action</span>
         </div>
 
         <div className="divide-y divide-slate-100">
@@ -136,7 +137,7 @@ export function QualificationTable({
                 <button
                   onClick={() => setOpenKey(isOpen ? null : key)}
                   aria-expanded={isOpen}
-                  className="grid w-full grid-cols-1 items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-slate-50 md:grid-cols-[1fr,110px,130px]"
+                  className="grid w-full grid-cols-1 items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-slate-50 md:grid-cols-[1fr,100px,120px,150px]"
                 >
                   <span className="flex items-center gap-2 text-sm font-medium text-slate-800">
                     <ChevronDownIcon
@@ -159,6 +160,9 @@ export function QualificationTable({
                   </span>
                   <span className="pl-6 md:pl-0">
                     <Badge tone={visual.tone}>{visual.label}</Badge>
+                  </span>
+                  <span className="pl-6 text-xs text-slate-500 md:pl-0">
+                    {recruiterActionFor(req.status, req.requirement_outcome)}
                   </span>
                 </button>
 

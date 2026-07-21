@@ -13,20 +13,72 @@ import { cn } from "@/lib/cn";
 import type { JobInputState } from "@/lib/clientTypes";
 import type { StructuredJobFields as SJF } from "@/lib/types";
 
-const ADVANCED: { key: keyof SJF; label: string }[] = [
-  { key: "required_charting_system", label: "Charting system" },
-  { key: "required_patient_population", label: "Patient population" },
-  { key: "required_hospital_size", label: "Hospital size" },
-  { key: "required_trauma_level", label: "Trauma level" },
-  { key: "weekend_availability", label: "Weekend requirements" },
-  { key: "on_call_requirements", label: "On-call requirements" },
-  { key: "start_date", label: "Start date" },
-  { key: "contract_duration", label: "Contract duration" },
-  { key: "travel_eligibility", label: "Travel eligibility" },
-  { key: "local_candidate_eligibility", label: "Local eligibility" },
-  { key: "education_requirements", label: "Education requirements" },
-  { key: "program_accreditation_requirements", label: "Accreditation" },
-  { key: "additional_submission_restrictions", label: "Submission restrictions" },
+const ADVANCED: { key: keyof SJF; label: string; suggestion: string }[] = [
+  {
+    key: "required_charting_system",
+    label: "Charting system",
+    suggestion: "e.g. Epic, Cerner, Meditech.",
+  },
+  {
+    key: "required_patient_population",
+    label: "Patient population",
+    suggestion: "e.g. Adult, pediatric, neonatal.",
+  },
+  {
+    key: "required_hospital_size",
+    label: "Hospital size",
+    suggestion: "e.g. 500+ beds, Magnet-designated.",
+  },
+  {
+    key: "required_trauma_level",
+    label: "Trauma level",
+    suggestion: "e.g. Level I, Level II.",
+  },
+  {
+    key: "weekend_availability",
+    label: "Weekend requirements",
+    suggestion: "e.g. Every other weekend required.",
+  },
+  {
+    key: "on_call_requirements",
+    label: "On-call requirements",
+    suggestion: "e.g. 1 call shift per week.",
+  },
+  {
+    key: "start_date",
+    label: "Start date",
+    suggestion: "e.g. ASAP, or 2026-08-01.",
+  },
+  {
+    key: "contract_duration",
+    label: "Contract duration",
+    suggestion: "e.g. 13 weeks, permanent.",
+  },
+  {
+    key: "travel_eligibility",
+    label: "Travel eligibility",
+    suggestion: "e.g. Must live 50+ miles from facility.",
+  },
+  {
+    key: "local_candidate_eligibility",
+    label: "Local eligibility",
+    suggestion: "e.g. Local candidates accepted / not accepted.",
+  },
+  {
+    key: "education_requirements",
+    label: "Education requirements",
+    suggestion: "e.g. BSN required, ADN accepted.",
+  },
+  {
+    key: "program_accreditation_requirements",
+    label: "Accreditation",
+    suggestion: "e.g. ACEN or CCNE-accredited program.",
+  },
+  {
+    key: "additional_submission_restrictions",
+    label: "Submission restrictions",
+    suggestion: "e.g. No first-time travelers; 2 references required.",
+  },
 ];
 
 export function StructuredJobFields({
@@ -51,40 +103,49 @@ export function StructuredJobFields({
       />
       <CardBody className="space-y-6">
         <Group title="Basic information">
-          <Field label="Job ID">
+          <Field label="Job ID" suggestion="The MSP or client requisition number.">
             <TextInput
               value={job.job_id}
               onChange={(e) => setTop({ job_id: e.target.value })}
               placeholder="e.g. 48213"
             />
           </Field>
-          <Field label="Job title">
+          <Field
+            label="Job title"
+            suggestion="Use the exact title from the posting."
+          >
             <TextInput
               value={job.job_title}
               onChange={(e) => setTop({ job_title: e.target.value })}
               placeholder="e.g. CT Technologist"
             />
           </Field>
-          <Field label="MSP or client">
+          <Field
+            label="MSP or client"
+            suggestion="The staffing vendor or facility, e.g. AMN, Aya, Mercy Health."
+          >
             <TextInput
               value={job.msp_name}
               onChange={(e) => setTop({ msp_name: e.target.value })}
               placeholder="e.g. AMN / Mercy Hospital"
             />
           </Field>
-          <Field label="Specialty">
+          <Field label="Specialty" suggestion="e.g. CT, MRI, ICU, Med-Surg.">
             <TextInput
               value={job.structured.specialty ?? ""}
               onChange={(e) => setS({ specialty: e.target.value })}
             />
           </Field>
-          <Field label="Department">
+          <Field
+            label="Department"
+            suggestion="e.g. Radiology, Emergency, Quality."
+          >
             <TextInput
               value={job.structured.department ?? ""}
               onChange={(e) => setS({ department: e.target.value })}
             />
           </Field>
-          <Field label="Location">
+          <Field label="Location" suggestion="City and state, e.g. Columbus, OH.">
             <TextInput
               value={job.structured.location ?? ""}
               onChange={(e) => setS({ location: e.target.value })}
@@ -93,7 +154,10 @@ export function StructuredJobFields({
         </Group>
 
         <Group title="Mandatory requirements">
-          <Field label="Minimum experience">
+          <Field
+            label="Minimum experience"
+            suggestion="e.g. 2 years recent CT experience."
+          >
             <TextInput
               value={job.structured.minimum_years_experience ?? ""}
               onChange={(e) =>
@@ -101,31 +165,46 @@ export function StructuredJobFields({
               }
             />
           </Field>
-          <Field label="Required licenses">
+          <Field
+            label="Required licenses"
+            suggestion="e.g. Active Ohio or Compact RN license."
+          >
             <TextInput
               value={job.structured.required_licenses ?? ""}
               onChange={(e) => setS({ required_licenses: e.target.value })}
             />
           </Field>
-          <Field label="Required certifications">
+          <Field
+            label="Required certifications"
+            suggestion="e.g. ARRT(CT), BLS, ACLS."
+          >
             <TextInput
               value={job.structured.required_certifications ?? ""}
               onChange={(e) => setS({ required_certifications: e.target.value })}
             />
           </Field>
-          <Field label="Required equipment">
+          <Field
+            label="Required equipment"
+            suggestion="e.g. Siemens SOMATOM Force."
+          >
             <TextInput
               value={job.structured.required_equipment ?? ""}
               onChange={(e) => setS({ required_equipment: e.target.value })}
             />
           </Field>
-          <Field label="Required work setting">
+          <Field
+            label="Required work setting"
+            suggestion="e.g. Level I trauma, 500+ bed hospital."
+          >
             <TextInput
               value={job.structured.required_work_setting ?? ""}
               onChange={(e) => setS({ required_work_setting: e.target.value })}
             />
           </Field>
-          <Field label="Required shift">
+          <Field
+            label="Required shift"
+            suggestion="e.g. Nights, 3x12, weekends required."
+          >
             <TextInput
               value={job.structured.required_shift ?? ""}
               onChange={(e) => setS({ required_shift: e.target.value })}
@@ -151,7 +230,7 @@ export function StructuredJobFields({
           {showAdvanced && (
             <div className="mt-4 grid animate-fade-in gap-4 sm:grid-cols-2">
               {ADVANCED.map((f) => (
-                <Field key={f.key} label={f.label}>
+                <Field key={f.key} label={f.label} suggestion={f.suggestion}>
                   <TextInput
                     value={job.structured[f.key] ?? ""}
                     onChange={(e) =>

@@ -8,7 +8,7 @@ export function StrengthsCard({ strengths }: { strengths: string[] }) {
   return (
     <Card>
       <CardHeader
-        title="Candidate Strengths"
+        title="Documented Strengths"
         icon={<TrophyIcon className="h-5 w-5 text-emerald-600" />}
       />
       <CardBody>

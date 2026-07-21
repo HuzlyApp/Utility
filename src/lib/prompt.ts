@@ -91,6 +91,19 @@ For every qualification, classify the evidence as:
 
 Not found does not automatically mean the candidate lacks the qualification. It means the recruiter should verify it unless the résumé clearly establishes that the requirement is not met.
 
+REQUIREMENT OUTCOME MAPPING
+
+Set requirement_outcome strictly from the evidence, using this mapping:
+
+- CONFIRMED evidence -> MET
+- PARTIAL evidence -> VERIFY
+- NOT_FOUND (the requirement is simply not mentioned) -> VERIFY
+- CONFLICTING evidence -> CONFLICT
+- NOT_APPLICABLE requirement -> NOT_APPLICABLE
+- Only use NOT_MET when the supplied information EXPLICITLY contradicts the requirement (for example: the résumé states one year of experience when two are required, states the license is expired, or states the candidate cannot work the required shift).
+
+Never use NOT_MET for a requirement that is missing, unstated, or merely unverified. Missing information is VERIFY, not NOT_MET. A candidate must not be marked not met, not currently submittable, or stopped solely because the résumé is silent about a requirement.
+
 MANDATORY REQUIREMENTS
 
 First identify every mandatory requirement from the job description and structured job fields.

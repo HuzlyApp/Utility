@@ -8,12 +8,13 @@ export function RisksCard({ risks }: { risks: string[] }) {
   return (
     <Card>
       <CardHeader
-        title="Gaps & Risks"
+        title="Verification Needs"
+        description="Items to confirm during screening — not confirmed failures."
         icon={<AlertIcon className="h-5 w-5 text-amber-600" />}
       />
       <CardBody>
         {risks.length === 0 ? (
-          <p className="text-sm text-slate-400">No gaps or risks captured.</p>
+          <p className="text-sm text-slate-400">Nothing outstanding to verify.</p>
         ) : (
           <ul className="space-y-2.5">
             {risks.map((r, i) => (

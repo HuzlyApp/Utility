@@ -61,8 +61,9 @@ describe("mandatory override logic", () => {
         makeRequirement({ status: "CONFIRMED", requirement_outcome: "MET" }),
         makeRequirement({
           requirement: "Active state license",
-          status: "CONFLICTING",
+          status: "PARTIAL",
           requirement_outcome: "NOT_MET",
+          candidate_evidence: "Résumé states the RN license expired in 2024",
         }),
       ],
     });

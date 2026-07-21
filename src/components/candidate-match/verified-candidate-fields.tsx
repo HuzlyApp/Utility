@@ -13,13 +13,37 @@ import { ShieldIcon, UserIcon } from "@/components/ui/icons";
 import type { CandidateInputState } from "@/lib/clientTypes";
 import type { VerifiedRecruiterInputs as VRI } from "@/lib/types";
 
-const VERIFIED: { key: keyof VRI; label: string }[] = [
-  { key: "license_information", label: "Active licenses" },
-  { key: "certification_information", label: "Certifications" },
-  { key: "equipment_experience", label: "Equipment experience" },
-  { key: "shift_availability", label: "Shift availability" },
-  { key: "start_date_availability", label: "Start-date availability" },
-  { key: "travel_or_local_preference", label: "Travel / local preference" },
+const VERIFIED: { key: keyof VRI; label: string; suggestion: string }[] = [
+  {
+    key: "license_information",
+    label: "Active licenses",
+    suggestion: "e.g. OH RN license #123456, active through 2027.",
+  },
+  {
+    key: "certification_information",
+    label: "Certifications",
+    suggestion: "e.g. BLS (AHA) valid to 06/2027, ACLS current.",
+  },
+  {
+    key: "equipment_experience",
+    label: "Equipment experience",
+    suggestion: "e.g. Confirmed Siemens SOMATOM Force experience.",
+  },
+  {
+    key: "shift_availability",
+    label: "Shift availability",
+    suggestion: "e.g. Available for nights and weekends.",
+  },
+  {
+    key: "start_date_availability",
+    label: "Start-date availability",
+    suggestion: "e.g. Can start within 2 weeks.",
+  },
+  {
+    key: "travel_or_local_preference",
+    label: "Travel / local preference",
+    suggestion: "e.g. Open to travel; lives 60 miles from facility.",
+  },
 ];
 
 export function VerifiedCandidateFields({
@@ -43,7 +67,10 @@ export function VerifiedCandidateFields({
           icon={<UserIcon className="h-5 w-5" />}
         />
         <CardBody>
-          <Field label="Candidate name">
+          <Field
+            label="Candidate name"
+            suggestion="For your reference only — never used in scoring."
+          >
             <TextInput
               value={candidate.candidate_name}
               onChange={(e) => setTop({ candidate_name: e.target.value })}
@@ -61,7 +88,7 @@ export function VerifiedCandidateFields({
         />
         <CardBody className="grid gap-4 sm:grid-cols-2">
           {VERIFIED.map((f) => (
-            <Field key={f.key} label={f.label}>
+            <Field key={f.key} label={f.label} suggestion={f.suggestion}>
               <TextInput
                 value={candidate.verified[f.key] ?? ""}
                 onChange={(e) =>
@@ -71,7 +98,10 @@ export function VerifiedCandidateFields({
             </Field>
           ))}
           <div className="sm:col-span-2">
-            <Field label="Availability notes">
+            <Field
+              label="Availability notes"
+              suggestion="Anything you confirmed directly with the candidate."
+            >
               <TextInput
                 value={candidate.verified.availability_notes ?? ""}
                 onChange={(e) => setV({ availability_notes: e.target.value })}
@@ -93,6 +123,9 @@ export function VerifiedCandidateFields({
             onChange={(e) => setTop({ recruiter_notes: e.target.value })}
             placeholder="Anything else the analyst should be aware of…"
           />
+          <p className="mt-1 text-xs text-slate-400">
+            e.g. Candidate is relocating to Ohio; prefers day shift but flexible.
+          </p>
         </CardBody>
       </Card>
     </div>

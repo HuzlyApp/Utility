@@ -246,11 +246,13 @@ export function TextArea({
 export function Field({
   label,
   hint,
+  suggestion,
   htmlFor,
   children,
 }: {
   label: string;
   hint?: string;
+  suggestion?: string;
   htmlFor?: string;
   children: React.ReactNode;
 }) {
@@ -264,6 +266,9 @@ export function Field({
       </label>
       {hint && <p className="mb-1.5 text-xs text-slate-400">{hint}</p>}
       {children}
+      {suggestion && (
+        <p className="mt-1 text-xs text-slate-400">{suggestion}</p>
+      )}
     </div>
   );
 }

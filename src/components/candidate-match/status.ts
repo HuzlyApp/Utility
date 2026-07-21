@@ -38,9 +38,77 @@ export const CATEGORY_RING_COLOR: Record<MatchCategory, string> = {
   NEEDS_MORE_INFORMATION: "text-slate-500",
 };
 
+// Soft/light hero styling — strong red is reserved for a confirmed mandatory
+// failure (NOT_CURRENTLY_SUBMITTABLE); missing info uses a calm blue (spec §3).
+export interface CategorySoft {
+  bg: string;
+  border: string;
+  accent: string;
+  ring: string;
+}
+export const CATEGORY_SOFT: Record<MatchCategory, CategorySoft> = {
+  STRONG_MATCH: {
+    bg: "bg-green-50",
+    border: "border-green-200",
+    accent: "text-green-700",
+    ring: "text-green-600",
+  },
+  GOOD_MATCH: {
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    accent: "text-emerald-700",
+    ring: "text-emerald-600",
+  },
+  POSSIBLE_MATCH: {
+    bg: "bg-amber-50",
+    border: "border-amber-200",
+    accent: "text-amber-700",
+    ring: "text-amber-500",
+  },
+  WEAK_MATCH: {
+    bg: "bg-orange-50",
+    border: "border-orange-200",
+    accent: "text-orange-700",
+    ring: "text-orange-500",
+  },
+  NOT_A_MATCH: {
+    bg: "bg-rose-50",
+    border: "border-rose-200",
+    accent: "text-rose-700",
+    ring: "text-rose-400",
+  },
+  NOT_CURRENTLY_SUBMITTABLE: {
+    bg: "bg-red-50",
+    border: "border-red-200",
+    accent: "text-red-700",
+    ring: "text-red-600",
+  },
+  NEEDS_MORE_INFORMATION: {
+    bg: "bg-blue-50",
+    border: "border-blue-200",
+    accent: "text-blue-700",
+    ring: "text-blue-600",
+  },
+};
+
 export interface RequirementVisual {
   tone: BadgeTone;
   label: string;
+}
+
+// Suggested recruiter action per requirement outcome (spec §8 table).
+export function recruiterActionFor(
+  status: EvidenceStatus,
+  outcome: RequirementOutcome
+): string {
+  if (outcome === "MET") return "None";
+  if (outcome === "NOT_MET") return "Blocking — confirm with candidate";
+  if (outcome === "CONFLICT" || status === "CONFLICTING")
+    return "Resolve conflict";
+  if (status === "PARTIAL") return "Confirm details";
+  if (status === "NOT_FOUND") return "Ask candidate";
+  if (outcome === "VERIFY") return "Verify";
+  return "Review";
 }
 
 // Maps evidence status + outcome to a badge tone + human label (spec §15/§22).

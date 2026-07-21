@@ -4,15 +4,18 @@ import React, { useRef, useState } from "react";
 import { CandidateMatchHeader } from "@/components/candidate-match/candidate-match-header";
 import {
   CandidateMatchStepper,
-  WORKFLOW_STEPS,
 } from "@/components/candidate-match/candidate-match-stepper";
 import { JobRequirementsScreen } from "@/components/candidate-match/job-requirements-screen";
 import { CandidateInformationScreen } from "@/components/candidate-match/candidate-information-screen";
 import { StickyActionBar } from "@/components/candidate-match/sticky-action-bar";
 import { AnalysisLoadingState } from "@/components/candidate-match/analysis-loading-state";
-import { MatchAssessment } from "@/components/candidate-match/match-assessment";
+import {
+  MatchAssessment,
+  type WorkspaceControls,
+} from "@/components/candidate-match/match-assessment";
+import type { RankedCandidate } from "@/components/candidate-match/candidate-ranking-panel";
 import { Button, Card, CardBody } from "@/components/ui/primitives";
-import { ScanIcon, AlertIcon } from "@/components/ui/icons";
+import { ScanIcon, AlertIcon, CheckIcon } from "@/components/ui/icons";
 import { useToast } from "@/components/ui/toast";
 import type {
   AnalyzeResponse,
@@ -22,6 +25,11 @@ import type {
 import type { AnalyzeRequestBody } from "@/lib/types";
 
 type Phase = "job" | "candidate" | "loading" | "result" | "error";
+
+interface WorkspaceCandidate {
+  input: CandidateInputState;
+  result: AnalyzeResponse;
+}
 
 const emptyJob: JobInputState = {
   job_id: "",
@@ -43,7 +51,8 @@ export default function Home() {
   const [phase, setPhase] = useState<Phase>("job");
   const [job, setJob] = useState<JobInputState>(emptyJob);
   const [candidate, setCandidate] = useState<CandidateInputState>(emptyCandidate);
-  const [result, setResult] = useState<AnalyzeResponse | null>(null);
+  const [candidates, setCandidates] = useState<WorkspaceCandidate[]>([]);
+  const [activeCandidate, setActiveCandidate] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [reanalyzing, setReanalyzing] = useState(false);
   const inFlightRef = useRef(false);
@@ -51,13 +60,8 @@ export default function Home() {
   const jobReady = job.job_description_text.trim().length > 0;
   const candidateReady = candidate.resume_text.trim().length > 0;
 
-  const activeIndex =
-    phase === "job" ? 0 : phase === "candidate" ? 1 : 2;
-  const completed = [
-    jobReady,
-    candidateReady && jobReady,
-    phase === "result",
-  ];
+  const activeIndex = phase === "job" ? 0 : phase === "candidate" ? 1 : 2;
+  const completed = [jobReady, candidateReady && jobReady, phase === "result"];
 
   function goToStep(index: number) {
     if (index === 0) setPhase("job");
@@ -65,14 +69,12 @@ export default function Home() {
   }
 
   function buildBody(
+    src: CandidateInputState,
     extraVerified?: string
   ): AnalyzeRequestBody & { idempotency_key?: string } {
-    const verified = { ...candidate.verified };
+    const verified = { ...src.verified };
     if (extraVerified && extraVerified.trim()) {
-      verified.availability_notes = [
-        verified.availability_notes,
-        extraVerified.trim(),
-      ]
+      verified.availability_notes = [verified.availability_notes, extraVerified.trim()]
         .filter(Boolean)
         .join("\n");
     }
@@ -87,12 +89,12 @@ export default function Home() {
         msp_name: job.msp_name || undefined,
       },
       job_description_text: job.job_description_text,
-      resume_text: candidate.resume_text,
+      resume_text: src.resume_text,
       verified_recruiter_inputs: {
         ...verified,
-        candidate_name: candidate.candidate_name || undefined,
+        candidate_name: src.candidate_name || undefined,
       },
-      recruiter_notes: candidate.recruiter_notes || undefined,
+      recruiter_notes: src.recruiter_notes || undefined,
       idempotency_key:
         typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()
@@ -113,7 +115,7 @@ export default function Home() {
       const res = await fetch("/api/candidate-match/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildBody()),
+        body: JSON.stringify(buildBody(candidate)),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -121,7 +123,11 @@ export default function Home() {
         setPhase("error");
         return;
       }
-      setResult(data as AnalyzeResponse);
+      setCandidates((prev) => {
+        const next = [...prev, { input: candidate, result: data as AnalyzeResponse }];
+        setActiveCandidate(next.length - 1);
+        return next;
+      });
       setPhase("result");
       toast("Analysis completed.", "success");
     } catch {
@@ -133,23 +139,28 @@ export default function Home() {
   }
 
   async function reanalyze(extraVerified: string) {
-    if (!result) return;
+    const current = candidates[activeCandidate];
+    if (!current) return;
     setReanalyzing(true);
     try {
-      const url = result.analysis_id
-        ? `/api/candidate-match/${result.analysis_id}/reanalyze`
+      const url = current.result.analysis_id
+        ? `/api/candidate-match/${current.result.analysis_id}/reanalyze`
         : "/api/candidate-match/analyze";
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildBody(extraVerified)),
+        body: JSON.stringify(buildBody(current.input, extraVerified)),
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
         toast(data.error ?? "The reanalysis could not be completed.", "error");
         return;
       }
-      setResult(data as AnalyzeResponse);
+      setCandidates((prev) =>
+        prev.map((c, i) =>
+          i === activeCandidate ? { ...c, result: data as AnalyzeResponse } : c
+        )
+      );
       toast("Assessment updated.", "success");
     } catch {
       toast("The reanalysis could not be completed.", "error");
@@ -158,30 +169,73 @@ export default function Home() {
     }
   }
 
+  function selectCandidate(index: number) {
+    const c = candidates[index];
+    if (!c) return;
+    setActiveCandidate(index);
+    setCandidate(c.input);
+    setPhase("result");
+  }
+
+  function addAnotherCandidate() {
+    // Keep the job; only reset candidate-specific inputs (spec §15).
+    setCandidate(emptyCandidate);
+    setError(null);
+    setPhase("candidate");
+  }
+
   function startOver() {
     setJob(emptyJob);
     setCandidate(emptyCandidate);
-    setResult(null);
+    setCandidates([]);
+    setActiveCandidate(0);
     setError(null);
     setPhase("job");
   }
 
-  const showStepper = phase !== "loading";
+  const rankedCandidates: RankedCandidate[] = candidates.map((c) => ({
+    name: c.input.candidate_name,
+    score: c.result.validated_result.candidate_match.recommended_overall_match_score,
+    category: c.result.validated_result.candidate_match.match_category,
+  }));
+
+  const workspace: WorkspaceControls = {
+    candidates: rankedCandidates,
+    activeIndex: activeCandidate,
+    onSelect: selectCandidate,
+    onAddCandidate: addAnotherCandidate,
+    onStartNew: startOver,
+  };
+
+  const active = candidates[activeCandidate];
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
-      <CandidateMatchHeader
-        showNewAnalysis={phase === "result"}
-        onNewAnalysis={startOver}
-      />
+      {phase !== "result" && (
+        <CandidateMatchHeader showNewAnalysis={false} />
+      )}
 
-      {showStepper && (
+      {(phase === "job" || phase === "candidate") && (
         <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <CandidateMatchStepper
             activeIndex={activeIndex}
             completed={completed}
             onStepClick={goToStep}
           />
+        </div>
+      )}
+
+      {phase === "result" && (
+        <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-400">
+          <span className="text-slate-500">Job Requirements</span>
+          <CheckIcon className="h-3.5 w-3.5 text-brand-600" />
+          <span className="text-slate-300">/</span>
+          <span className="text-slate-500">Candidate Information</span>
+          <CheckIcon className="h-3.5 w-3.5 text-brand-600" />
+          <span className="text-slate-300">/</span>
+          <span className="rounded-full bg-green-100 px-2 py-0.5 text-green-700">
+            Analysis complete
+          </span>
         </div>
       )}
 
@@ -193,32 +247,21 @@ export default function Home() {
               primaryLabel="Continue"
               onPrimary={() => setPhase("candidate")}
               primaryDisabled={!jobReady}
-              hint={
-                !jobReady
-                  ? "Upload or paste a job description to continue."
-                  : undefined
-              }
+              hint={!jobReady ? "Upload or paste a job description to continue." : undefined}
             />
           </>
         )}
 
         {phase === "candidate" && (
           <>
-            <CandidateInformationScreen
-              candidate={candidate}
-              onChange={setCandidate}
-            />
+            <CandidateInformationScreen candidate={candidate} onChange={setCandidate} />
             <StickyActionBar
-              onBack={() => setPhase("job")}
+              onBack={() => setPhase(candidates.length > 0 ? "result" : "job")}
               primaryLabel="Analyze Candidate Match"
               primaryIcon={<ScanIcon className="h-4 w-4" />}
               onPrimary={analyze}
               primaryDisabled={!candidateReady}
-              hint={
-                !candidateReady
-                  ? "Add a résumé to run the analysis."
-                  : undefined
-              }
+              hint={!candidateReady ? "Add a résumé to run the analysis." : undefined}
             />
           </>
         )}
@@ -229,14 +272,14 @@ export default function Home() {
           </div>
         )}
 
-        {phase === "result" && result && (
+        {phase === "result" && active && (
           <MatchAssessment
-            data={result}
+            data={active.result}
             jobInput={job}
-            candidateInput={candidate}
+            candidateInput={active.input}
             onReanalyze={reanalyze}
-            onStartOver={startOver}
             reanalyzing={reanalyzing}
+            workspace={workspace}
           />
         )}
 
@@ -248,10 +291,7 @@ export default function Home() {
               </span>
               <p className="mb-4 text-sm text-slate-700">{error}</p>
               <div className="flex justify-center gap-3">
-                <Button
-                  variant="secondary"
-                  onClick={() => setPhase("candidate")}
-                >
+                <Button variant="secondary" onClick={() => setPhase("candidate")}>
                   Back to inputs
                 </Button>
                 <Button onClick={analyze}>Retry analysis</Button>
@@ -260,11 +300,6 @@ export default function Home() {
           </Card>
         )}
       </div>
-
-      <p className="mt-10 text-center text-xs text-slate-400">
-        {WORKFLOW_STEPS.length}-step recruiter workflow · Grok AI provides
-        decision support; the recruiter makes the final decision.
-      </p>
     </div>
   );
 }

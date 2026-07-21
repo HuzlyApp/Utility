@@ -5,9 +5,37 @@ import {
   SUBSCORE_WEIGHTS,
   type MatchCategory,
   type RecommendedAction,
+  type RequirementOutcome,
   type SubscoreKey,
   type SubmissionReadiness,
 } from "./types";
+
+/**
+ * Deterministic evidence-status -> requirement-outcome mapping (spec §2/§22).
+ *
+ * The critical fairness rule: absence of evidence is NOT evidence of absence.
+ * A requirement that is simply missing from the résumé (NOT_FOUND) — or a
+ * NOT_MET the model asserted without any supporting evidence — must become
+ * VERIFY, never a clear failure. NOT_MET survives only when the candidate
+ * evidence explicitly contradicts the requirement.
+ */
+export function normalizeOutcome(r: AiRequirement): RequirementOutcome {
+  if (r.status === "NOT_APPLICABLE") return "NOT_APPLICABLE";
+  if (r.status === "CONFLICTING") return "CONFLICT";
+
+  if (r.requirement_outcome === "NOT_MET") {
+    // Only a documented contradiction (evidence present, status not NOT_FOUND)
+    // can be a clear failure. Otherwise downgrade to VERIFY.
+    if (r.status === "NOT_FOUND" || r.candidate_evidence.trim() === "") {
+      return "VERIFY";
+    }
+    return "NOT_MET";
+  }
+
+  if (r.status === "CONFIRMED") return "MET";
+  if (r.status === "PARTIAL" || r.status === "NOT_FOUND") return "VERIFY";
+  return r.requirement_outcome;
+}
 
 export interface ScoreValidationResult {
   result: AiResult;
@@ -72,6 +100,26 @@ const MAX_ACTION_BY_CATEGORY: Record<MatchCategory, RecommendedAction> = {
 export function validateAndScore(ai: AiResult): ScoreValidationResult {
   const adjustments: string[] = [];
   const result: AiResult = structuredClone(ai);
+
+  // 0. Normalize every requirement outcome deterministically so that missing
+  //    or unsupported information can never be reported as a clear failure
+  //    (spec §2/§22). This is the authoritative mapping.
+  let downgraded = 0;
+  for (const r of [
+    ...result.mandatory_requirements,
+    ...result.preferred_requirements,
+  ]) {
+    const normalized = normalizeOutcome(r);
+    if (normalized !== r.requirement_outcome) {
+      if (r.requirement_outcome === "NOT_MET") downgraded += 1;
+      r.requirement_outcome = normalized;
+    }
+  }
+  if (downgraded > 0) {
+    adjustments.push(
+      `${downgraded} requirement(s) reported NOT_MET without supporting evidence were reclassified as VERIFY (absence of evidence is not a clear failure).`
+    );
+  }
 
   const mandatory = result.mandatory_requirements;
   const preferred = result.preferred_requirements;
