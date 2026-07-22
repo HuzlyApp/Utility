@@ -153,6 +153,114 @@ export async function setWorkspaceStatus(
   return true;
 }
 
+export interface DeleteWorkspaceResult {
+  deleted: boolean;
+  candidatesDeleted: number;
+  candidatesDetached: number;
+}
+
+// Permanently deletes a job workspace and the candidates placed only in that
+// job. Candidates that also belong to other jobs are detached (link removed)
+// but their records are kept. Related analyses and uploaded files are removed.
+export async function deleteWorkspace(
+  user: AppUser,
+  id: string
+): Promise<DeleteWorkspaceResult> {
+  const existing = await getWorkspace(user, id);
+  if (!existing) {
+    return { deleted: false, candidatesDeleted: 0, candidatesDetached: 0 };
+  }
+
+  const sql = getSql();
+
+  const linked = (await sql`
+    SELECT candidate_id FROM job_match_candidates
+    WHERE workspace_id = ${id} AND owner_user_id = ${user.id}
+  `) as { candidate_id: string }[];
+  const candidateIds = linked.map((r) => r.candidate_id);
+
+  const exclusive = candidateIds.length
+    ? ((await sql`
+        SELECT jmc.candidate_id
+        FROM job_match_candidates jmc
+        WHERE jmc.workspace_id = ${id}
+          AND jmc.owner_user_id = ${user.id}
+          AND NOT EXISTS (
+            SELECT 1 FROM job_match_candidates other
+            WHERE other.candidate_id = jmc.candidate_id
+              AND other.workspace_id <> ${id}
+          )
+      `) as { candidate_id: string }[])
+    : [];
+  const exclusiveIds = exclusive.map((r) => r.candidate_id);
+  const exclusiveSet = new Set(exclusiveIds);
+  const sharedCount = candidateIds.filter((cid) => !exclusiveSet.has(cid)).length;
+
+  // Clear analysis pointers before dropping analyses (no FK, but keeps rows consistent).
+  await sql`
+    UPDATE job_match_candidates
+    SET latest_analysis_id = NULL, updated_at = now()
+    WHERE workspace_id = ${id} AND owner_user_id = ${user.id}
+  `;
+
+  await sql`
+    DELETE FROM candidate_match_analyses
+    WHERE workspace_id = ${id} AND owner_user_id = ${user.id}
+  `;
+
+  await sql`
+    DELETE FROM entity_files
+    WHERE owner_user_id = ${user.id}
+      AND entity_type = 'job_workspace'
+      AND entity_id = ${id}
+  `;
+
+  if (exclusiveIds.length > 0) {
+    await sql`
+      DELETE FROM entity_files
+      WHERE owner_user_id = ${user.id}
+        AND entity_type = 'candidate'
+        AND entity_id IN ${sql(exclusiveIds)}
+    `;
+    await sql`
+      DELETE FROM candidates
+      WHERE owner_user_id = ${user.id}
+        AND id IN ${sql(exclusiveIds)}
+    `;
+  }
+
+  // Remaining shared links + screening/dispositions cascade from workspace delete.
+  const removed = (await sql`
+    DELETE FROM job_match_workspaces
+    WHERE id = ${id} AND owner_user_id = ${user.id}
+    RETURNING id
+  `) as { id: string }[];
+
+  if (removed.length === 0) {
+    return { deleted: false, candidatesDeleted: 0, candidatesDetached: 0 };
+  }
+
+  await audit({
+    actorUserId: user.id,
+    tenantId: user.tenantId,
+    entityType: "job_workspace",
+    entityId: id,
+    action: "WORKSPACE_DELETED",
+    previousValue: {
+      job_title: existing.job_title,
+      job_ref: existing.job_ref,
+      candidates_deleted: exclusiveIds.length,
+      candidates_detached: sharedCount,
+    },
+  });
+
+  return {
+    deleted: true,
+    candidatesDeleted: exclusiveIds.length,
+    candidatesDetached: sharedCount,
+  };
+}
+
 export interface DashboardStats {
   active_jobs: number;
   total_candidates: number;

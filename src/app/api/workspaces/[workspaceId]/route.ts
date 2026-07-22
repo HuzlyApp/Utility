@@ -5,6 +5,7 @@ import {
   getWorkspace,
   updateWorkspace,
   setWorkspaceStatus,
+  deleteWorkspace,
   type WorkspaceInput,
 } from "@/lib/dal/workspaces";
 
@@ -25,5 +26,16 @@ export async function PATCH(
     }
     await updateWorkspace(user, params.workspaceId, body);
     return ok({ id: params.workspaceId });
+  });
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: { workspaceId: string } }
+) {
+  return withUser("workspaces.delete", async (user) => {
+    const result = await deleteWorkspace(user, params.workspaceId);
+    if (!result.deleted) return fail("Workspace not found.", 404, "NOT_FOUND");
+    return ok(result);
   });
 }

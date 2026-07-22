@@ -5,6 +5,7 @@ import { getWorkspace } from "@/lib/dal/workspaces";
 import { listWorkspaceCandidates } from "@/lib/dal/candidates";
 import { Card, CardBody, CardHeader, Badge } from "@/components/ui/primitives";
 import { CreateJobForm } from "@/components/jobs/create-job-form";
+import { DeleteJobButton } from "@/components/jobs/delete-job-button";
 import { AddCandidates } from "@/components/workspace/add-candidates";
 import { RankingTable } from "@/components/workspace/ranking-table";
 import { JobDescriptionPanel } from "@/components/workspace/job-description-panel";
@@ -91,6 +92,12 @@ export default async function WorkspacePage({
           >
             Download Comparison Report
           </a>
+          <DeleteJobButton
+            workspaceId={ws.id}
+            jobTitle={ws.job_title}
+            candidateCount={candidates.length}
+            redirectToDashboard
+          />
         </div>
       </div>
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, CardBody, Badge } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
+import { DeleteJobButton } from "@/components/jobs/delete-job-button";
 import type { WorkspaceSummary } from "@/lib/dal/types";
 
 function timeAgo(iso: string): string {
@@ -129,6 +130,11 @@ export function JobTiles({ workspaces }: { workspaces: WorkspaceSummary[] }) {
               >
                 {busy === w.id ? "Archiving…" : "Archive"}
               </button>
+              <DeleteJobButton
+                workspaceId={w.id}
+                jobTitle={w.job_title}
+                candidateCount={w.candidate_count}
+              />
               <span className="ml-auto text-[11px] text-slate-400">
                 Updated {timeAgo(w.updated_at)}
               </span>
