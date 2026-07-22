@@ -78,8 +78,12 @@ async function callModel(
     const completion = await getClient().chat.completions.create({
       model: config.xaiModel,
       messages,
-      temperature: 0.1,
+      temperature: config.xaiTemperature,
       response_format: { type: "json_object" },
+      // xAI extension for grok-4.5 reasoning depth (ignored by non-reasoning models).
+      reasoning_effort: config.xaiReasoningEffort,
+    } as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming & {
+      reasoning_effort?: "low" | "medium" | "high";
     });
 
     const duration = Date.now() - startTime;
@@ -89,6 +93,8 @@ async function callModel(
       attempt: attemptNumber,
       durationMs: duration,
       model: config.xaiModel,
+      reasoningEffort: config.xaiReasoningEffort,
+      temperature: config.xaiTemperature,
       promptTokens: completion.usage?.prompt_tokens,
       completionTokens: completion.usage?.completion_tokens,
       totalTokens: completion.usage?.total_tokens,

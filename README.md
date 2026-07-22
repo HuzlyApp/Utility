@@ -47,8 +47,10 @@ npm install
 
 ```
 XAI_API_KEY=...              # xAI / Grok API key
-XAI_MODEL=grok-4-fast        # Model: grok-4-fast, grok-4, or grok-3
-XAI_TIMEOUT_MS=60000         # API timeout (ms)
+XAI_MODEL=grok-4.5           # Model: grok-4.5 (default), grok-4.3, grok-4
+XAI_REASONING_EFFORT=high    # low | medium | high
+XAI_TEMPERATURE=0            # 0 for more consistent scoring
+XAI_TIMEOUT_MS=180000        # reasoning models need longer timeouts
 XAI_MAX_RETRIES=1            # Max retries for temporary failures
 DATABASE_URL=postgres://...  # Neon connection string (optional; persistence)
 NEON_API_KEY=...             # Neon API key for MCP (get from console.neon.tech)
@@ -75,8 +77,10 @@ The application uses **Grok AI** via the xAI API for candidate matching analysis
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `XAI_MODEL` | `grok-4-fast` | Model: `grok-4-fast`, `grok-4`, or `grok-3` |
-| `XAI_TIMEOUT_MS` | `60000` | Request timeout in milliseconds |
+| `XAI_MODEL` | `grok-4.5` | Model: `grok-4.5`, `grok-4.3`, or `grok-4` |
+| `XAI_REASONING_EFFORT` | `high` | Reasoning depth for grok-4.5: `low`, `medium`, `high` |
+| `XAI_TEMPERATURE` | `0` | Keep at `0` for more consistent match scores |
+| `XAI_TIMEOUT_MS` | `180000` | Request timeout in milliseconds |
 | `XAI_MAX_RETRIES` | `1` | Max retries for temporary failures |
 
 ### Safety Features
@@ -129,7 +133,7 @@ Only metadata is logged (no résumé/job content):
 {
   "event": "analyze",
   "analysis_id": "...",
-  "model": "grok-4-fast",
+  "model": "grok-4.5",
   "duration_ms": 1234,
   "job_chars": 1500,
   "resume_chars": 2000,

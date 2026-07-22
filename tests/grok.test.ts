@@ -239,7 +239,7 @@ describe("Grok AI Error Scenarios", () => {
     process.env.XAI_API_KEY = originalKey || "test-key";
   });
 
-  it("model falls back to grok-4-fast when not specified", () => {
+  it("model falls back to grok-4.5 when not specified", () => {
     // The default is set in config
     expect(config.xaiModel).toBeDefined();
   });
