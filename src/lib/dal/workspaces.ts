@@ -220,12 +220,32 @@ export async function deleteWorkspace(
       DELETE FROM entity_files
       WHERE owner_user_id = ${user.id}
         AND entity_type = 'candidate'
-        AND entity_id IN ${sql(exclusiveIds)}
+        AND entity_id IN (
+          SELECT jmc.candidate_id
+          FROM job_match_candidates jmc
+          WHERE jmc.workspace_id = ${id}
+            AND jmc.owner_user_id = ${user.id}
+            AND NOT EXISTS (
+              SELECT 1 FROM job_match_candidates other
+              WHERE other.candidate_id = jmc.candidate_id
+                AND other.workspace_id <> ${id}
+            )
+        )
     `;
     await sql`
       DELETE FROM candidates
       WHERE owner_user_id = ${user.id}
-        AND id IN ${sql(exclusiveIds)}
+        AND id IN (
+          SELECT jmc.candidate_id
+          FROM job_match_candidates jmc
+          WHERE jmc.workspace_id = ${id}
+            AND jmc.owner_user_id = ${user.id}
+            AND NOT EXISTS (
+              SELECT 1 FROM job_match_candidates other
+              WHERE other.candidate_id = jmc.candidate_id
+                AND other.workspace_id <> ${id}
+            )
+        )
     `;
   }
 
