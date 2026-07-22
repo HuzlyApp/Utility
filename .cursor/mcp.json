@@ -6,6 +6,15 @@
       "env": {
         "NEON_API_KEY": "${NEON_API_KEY}"
       }
+    },
+    "vercel": {
+      "type": "http",
+      "url": "https://mcp.vercel.com"
+    }
+  },
+  "mcpServers": {
+    "vercel": {
+      "url": "https://mcp.vercel.com"
     }
   }
 }

@@ -53,6 +53,10 @@ async function findUser(email) {
 async function main() {
   let user = await findUser(EMAIL);
 
+  const forceReset =
+    process.env.ADMIN_FORCE_PASSWORD_RESET === "1" ||
+    process.argv.includes("--reset-password");
+
   if (!user) {
     console.log(`Creating Neon Auth user ${EMAIL} ...`);
     const origin = process.env.BOOTSTRAP_ORIGIN ?? "http://localhost:3000";
@@ -74,6 +78,24 @@ async function main() {
     }
     user = await findUser(EMAIL);
     if (!user) throw new Error("User was not created by the auth server.");
+  } else if (forceReset) {
+    console.log(`Resetting password for existing user ${EMAIL} ...`);
+    const { hashPassword } = await import("better-auth/crypto");
+    const hashed = await hashPassword(PASSWORD);
+    await run(
+      `UPDATE neon_auth.account
+       SET password = $1, "updatedAt" = now()
+       WHERE "userId" = $2 AND "providerId" = 'credential'`,
+      hashed,
+      user.id
+    );
+    await run(
+      `UPDATE neon_auth."user"
+       SET "emailVerified" = true, "updatedAt" = now()
+       WHERE id = $1`,
+      user.id
+    );
+    console.log("Password reset and email marked verified.");
   } else {
     console.log(`User ${EMAIL} already exists; not overwriting.`);
   }
