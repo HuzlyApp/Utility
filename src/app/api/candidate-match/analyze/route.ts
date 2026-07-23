@@ -8,6 +8,8 @@ import {
   TimeoutError,
   EmptyResponseError,
   AiServiceError,
+  ProviderUnavailableError,
+  resolveAiSelection,
 } from "@/lib/ai";
 import { ok, fail, logServerError, logOperational } from "@/lib/http";
 import { summarizeMandatory } from "@/lib/scoring";
@@ -25,6 +27,9 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as AnalyzeRequestBody & {
       idempotency_key?: string;
+      ai_provider?: string;
+      ai_model?: string;
+      ai_model_option?: string;
     };
 
     if (!body.job_description_text || body.job_description_text.trim().length === 0) {
@@ -46,6 +51,8 @@ export async function POST(req: NextRequest) {
       inFlight.add(idempotencyKey);
     }
 
+    const selection = resolveAiSelection(body);
+
     const input: AnalyzeRequestBody = {
       job_id: body.job_id,
       job_title: body.job_title,
@@ -58,7 +65,11 @@ export async function POST(req: NextRequest) {
     };
 
     const startedAt = Date.now();
-    const analysis = await performAnalysis(input);
+    const analysis = await performAnalysis(input, {
+      provider: selection.provider,
+      model: selection.model,
+      optionId: selection.optionId,
+    });
 
     let analysisId: string | null = null;
     try {
@@ -68,6 +79,7 @@ export async function POST(req: NextRequest) {
         validated: analysis.validatedResult,
         scoreAdjustments: analysis.scoreAdjustments,
         model: analysis.model,
+        provider: analysis.provider,
       });
     } catch (dbErr) {
       // Persistence is best-effort; never block the recruiter on a DB error.
@@ -78,6 +90,7 @@ export async function POST(req: NextRequest) {
     logOperational({
       event: "analyze",
       analysis_id: analysisId,
+      provider: analysis.provider,
       model: analysis.model,
       duration_ms: Date.now() - startedAt,
       job_chars: input.job_description_text.length,
@@ -92,12 +105,17 @@ export async function POST(req: NextRequest) {
       ai_result: analysis.aiResult,
       validated_result: analysis.validatedResult,
       score_adjustments: analysis.scoreAdjustments,
+      ai_provider: analysis.provider,
+      ai_model: analysis.model,
       mandatory_summary: summarizeMandatory(
         analysis.validatedResult.mandatory_requirements
       ),
       created_at: new Date().toISOString(),
     });
   } catch (err) {
+    if (err instanceof ProviderUnavailableError) {
+      return fail(err.message, 503, "PROVIDER_UNAVAILABLE");
+    }
     // Handle specific error types with appropriate user-facing messages
     if (err instanceof ConfigurationError) {
       logServerError("analyze:config", err.message);

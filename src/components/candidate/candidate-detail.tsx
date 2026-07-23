@@ -25,6 +25,16 @@ import type { AiResult } from "@/lib/schema";
 import type { EntityFile, DashboardDisposition } from "@/lib/dal/types";
 import { DASHBOARD_DISPOSITIONS, DISPOSITION_LABELS } from "@/lib/dal/types";
 import type { VerifiedRecruiterInputs } from "@/lib/types";
+import {
+  AiModelSelector,
+  ModelBadge,
+  type ProviderAvailability,
+} from "@/components/workspace/ai-model-selector";
+import { useAiModelSelection } from "@/hooks/use-ai-model-selection";
+import {
+  AnalysisProgressBar,
+  useEstimatedAnalysisPercent,
+} from "@/components/workspace/analysis-progress";
 
 interface CandidateProps {
   id: string;
@@ -45,6 +55,9 @@ interface AnalysisProps {
   validated_result: AiResult;
   score_adjustments: string[];
   created_at: string;
+  ai_provider?: string | null;
+  ai_model?: string | null;
+  model_name?: string | null;
 }
 
 function scoreColor(score: number): string {
@@ -73,10 +86,20 @@ export function CandidateDetail({
   savedAnswers: { question: string; answer: string }[];
   disposition: string | null;
   dispositionNotes: string | null;
-  history: { id: string; overall_match_score: number | null; match_category: string | null; created_at: string }[];
+  history: {
+    id: string;
+    overall_match_score: number | null;
+    match_category: string | null;
+    created_at: string;
+    ai_provider?: string | null;
+    ai_model?: string | null;
+    model_name?: string | null;
+  }[];
 }) {
   const router = useRouter();
   const { toast } = useToast();
+  const { optionId, setOptionId, option, requestBody } = useAiModelSelection();
+  const [availability, setAvailability] = useState<ProviderAvailability | null>(null);
 
   const [name, setName] = useState(candidate.full_name ?? "");
   const [email, setEmail] = useState(candidate.email ?? "");
@@ -88,6 +111,25 @@ export function CandidateDetail({
   const [verified, setVerified] = useState<VerifiedRecruiterInputs>(candidate.verified_information ?? {});
   const [savingCandidate, setSavingCandidate] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
+  const estimatePercent = useEstimatedAnalysisPercent(reanalyzing);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/ai/providers");
+        const data = await res.json();
+        if (!cancelled && res.ok && data.success) {
+          setAvailability(data.availability as ProviderAvailability);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const [verifications, setVerifications] = useState<VerificationState>({});
   const [answers, setAnswers] = useState<Record<number, string>>(() => {
@@ -130,18 +172,30 @@ export function CandidateDetail({
       toast("Attach this candidate to a job first.", "error");
       return;
     }
+    if (availability && !availability[option.provider]?.available) {
+      toast(
+        availability[option.provider]?.message ??
+          `${option.label} is unavailable.`,
+        "error"
+      );
+      return;
+    }
     setReanalyzing(true);
     try {
       const res = await fetch(
         `/api/workspaces/${workspaceId}/candidates/${candidate.id}/analyze`,
-        { method: "POST" }
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        }
       );
       const data = await res.json();
       if (!res.ok || !data.success) {
         toast(data.error ?? "Analysis failed.", "error");
         return;
       }
-      toast("Assessment updated.", "success");
+      toast(`Assessment updated with ${option.label}.`, "success");
       router.refresh();
     } catch {
       toast("Analysis failed.", "error");
@@ -241,23 +295,45 @@ export function CandidateDetail({
                 {jobTitle ? `For: ${jobTitle}` : "No job attached"}
               </p>
               {cm && (
-                <div className="mt-2 flex flex-wrap gap-2">
+                <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Badge tone="blue">{DISPLAY_CATEGORY[cm.match_category as MatchCategory]}</Badge>
                   <Badge tone="slate">Confidence {cm.confidence_score}%</Badge>
                   <Badge tone="slate">{DISPLAY_ACTION[cm.recommended_action]}</Badge>
+                  <ModelBadge
+                    provider={analysis?.ai_provider}
+                    model={analysis?.ai_model ?? analysis?.model_name}
+                  />
                 </div>
               )}
               {cm && (
                 <p className="mt-2 text-sm text-slate-600">{cm.recruiter_decision_summary}</p>
               )}
             </div>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col items-stretch gap-2 sm:items-end">
+              <AiModelSelector
+                value={optionId}
+                onChange={setOptionId}
+                disabled={reanalyzing}
+                availability={availability}
+              />
               <Button onClick={reanalyze} disabled={reanalyzing || !workspaceId}>
-                {reanalyzing ? "Analyzing…" : analysis ? "Reanalyze" : "Analyze"}
+                {reanalyzing
+                  ? `${option.loadingLabel.replace(/…$/, "")} ${estimatePercent}%`
+                  : analysis
+                    ? "Reanalyze"
+                    : "Analyze"}
               </Button>
             </div>
           </CardBody>
         </Card>
+
+        {reanalyzing && (
+          <AnalysisProgressBar
+            percent={estimatePercent}
+            label={option.loadingLabel}
+            detail="Percentage is an estimate until the model finishes this candidate."
+          />
+        )}
 
         {r ? (
           <>
@@ -464,13 +540,20 @@ export function CandidateDetail({
             <CardHeader title="Analysis history" />
             <CardBody className="space-y-1 text-sm">
               {history.map((h) => (
-                <div key={h.id} className="flex items-center justify-between">
+                <div key={h.id} className="flex items-center justify-between gap-2">
                   <span className="text-slate-500">
                     {new Date(h.created_at).toLocaleString()}
                   </span>
-                  <span className="font-medium text-slate-700">
+                  <span className="flex items-center gap-2 font-medium text-slate-700">
+                    <ModelBadge
+                      provider={h.ai_provider}
+                      model={h.ai_model ?? h.model_name}
+                    />
                     {h.overall_match_score ?? "—"}% ·{" "}
-                    {h.match_category ? DISPLAY_CATEGORY[h.match_category as MatchCategory] ?? h.match_category : ""}
+                    {h.match_category
+                      ? DISPLAY_CATEGORY[h.match_category as MatchCategory] ??
+                        h.match_category
+                      : ""}
                   </span>
                 </div>
               ))}

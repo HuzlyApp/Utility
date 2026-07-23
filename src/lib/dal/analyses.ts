@@ -4,6 +4,7 @@ import { audit } from "./audit";
 import type { AppUser } from "@/lib/auth/session";
 import type { AiResult } from "@/lib/schema";
 import type { AnalyzeRequestBody } from "@/lib/types";
+import type { AiProvider } from "@/lib/ai";
 
 export interface SaveAnalysisParams {
   user: AppUser;
@@ -15,6 +16,9 @@ export interface SaveAnalysisParams {
   validated: AiResult;
   scoreAdjustments: string[];
   model: string;
+  provider?: AiProvider;
+  analysisStatus?: "completed" | "failed";
+  analysisError?: string | null;
 }
 
 export async function saveCandidateAnalysis(
@@ -23,6 +27,9 @@ export async function saveCandidateAnalysis(
   const sql = getSql();
   const { user, validated } = params;
   const cm = validated.candidate_match;
+  const provider = params.provider ?? "grok";
+  const status = params.analysisStatus ?? "completed";
+  const analyzedAt = new Date().toISOString();
 
   const rows = (await sql`
     INSERT INTO candidate_match_analyses (
@@ -33,7 +40,8 @@ export async function saveCandidateAnalysis(
       verified_recruiter_inputs_json, recruiter_notes,
       ai_raw_response_json, validated_result_json, score_adjustments_json,
       overall_match_score, match_category, recommended_action,
-      submission_readiness, confidence_score, analysis_version, model_name
+      submission_readiness, confidence_score, analysis_version, model_name,
+      ai_provider, ai_model, analysis_status, analysis_error, analyzed_at
     ) VALUES (
       ${user.tenantId}, ${user.id}, ${user.id}, ${user.id},
       ${params.workspaceId}, ${params.candidateId}, ${params.jobMatchCandidateId},
@@ -45,7 +53,8 @@ export async function saveCandidateAnalysis(
       ${JSON.stringify(params.scoreAdjustments)},
       ${cm.recommended_overall_match_score}, ${cm.match_category}, ${cm.recommended_action},
       ${validated.submission_readiness.readiness_status}, ${cm.confidence_score},
-      ${validated.analysis_version}, ${params.model}
+      ${validated.analysis_version}, ${params.model},
+      ${provider}, ${params.model}, ${status}, ${params.analysisError ?? null}, ${analyzedAt}
     ) RETURNING id
   `) as { id: string }[];
 
@@ -80,6 +89,8 @@ export async function saveCandidateAnalysis(
       workspaceId: params.workspaceId,
       match_category: cm.match_category,
       overall_match_score: cm.recommended_overall_match_score,
+      ai_provider: provider,
+      ai_model: params.model,
     },
   });
 
@@ -94,6 +105,10 @@ export interface StoredAnalysis {
   score_adjustments: string[];
   created_at: string;
   model_name: string | null;
+  ai_provider: string | null;
+  ai_model: string | null;
+  analysis_status: string | null;
+  analyzed_at: string | null;
 }
 
 export async function getAnalysis(
@@ -103,7 +118,8 @@ export async function getAnalysis(
   const sql = getSql();
   const rows = (await sql`
     SELECT id, workspace_id, candidate_id, validated_result_json,
-           score_adjustments_json, created_at, model_name
+           score_adjustments_json, created_at, model_name,
+           ai_provider, ai_model, analysis_status, analyzed_at
     FROM candidate_match_analyses
     WHERE id = ${id} AND owner_user_id = ${user.id}
   `) as Array<Record<string, unknown>>;
@@ -117,6 +133,12 @@ export async function getAnalysis(
     score_adjustments: (row.score_adjustments_json as string[]) ?? [],
     created_at: String(row.created_at),
     model_name: (row.model_name as string) ?? null,
+    ai_provider: (row.ai_provider as string) ?? null,
+    ai_model: (row.ai_model as string) ?? (row.model_name as string) ?? null,
+    analysis_status: (row.analysis_status as string) ?? "completed",
+    analyzed_at: row.analyzed_at
+      ? String(row.analyzed_at)
+      : String(row.created_at),
   };
 }
 
@@ -126,6 +148,8 @@ export interface AnalysisHistoryItem {
   match_category: string | null;
   submission_readiness: string | null;
   model_name: string | null;
+  ai_provider: string | null;
+  ai_model: string | null;
   created_at: string;
 }
 
@@ -136,7 +160,7 @@ export async function listCandidateAnalyses(
   const sql = getSql();
   const rows = (await sql`
     SELECT id, overall_match_score, match_category, submission_readiness,
-           model_name, created_at
+           model_name, ai_provider, ai_model, created_at
     FROM candidate_match_analyses
     WHERE candidate_id = ${candidateId} AND owner_user_id = ${user.id}
     ORDER BY created_at DESC

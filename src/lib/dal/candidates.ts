@@ -214,6 +214,8 @@ export async function listWorkspaceCandidates(
       a.recommended_action,
       a.confidence_score,
       a.created_at AS analyzed_at,
+      a.ai_provider,
+      COALESCE(a.ai_model, a.model_name) AS ai_model,
       jmc.updated_at,
       d.disposition,
       (SELECT COUNT(*) FROM candidate_match_requirements r
@@ -254,5 +256,7 @@ export async function listWorkspaceCandidates(
     disposition: (r.disposition as string) ?? null,
     analyzed_at: (r.analyzed_at as string) ?? null,
     updated_at: r.updated_at as string,
+    ai_provider: (r.ai_provider as string) ?? null,
+    ai_model: (r.ai_model as string) ?? null,
   }));
 }

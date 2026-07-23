@@ -1,9 +1,20 @@
-import { runAnalysis } from "./ai";
+import { analyzeCandidate } from "./ai";
 import { validateAndScore } from "./scoring";
 import { sanitizeResumeText } from "./sanitize";
 import { config } from "./config";
 import type { AiResult } from "./schema";
 import type { AnalyzeRequestBody } from "./types";
+import type { AiModelOptionId, AiProvider } from "./ai";
+import { DEFAULT_AI_MODEL_OPTION } from "./ai";
+
+export interface PerformAnalysisOptions {
+  analysisId?: string;
+  tenantId?: string;
+  userId?: string;
+  provider?: AiProvider;
+  model?: string;
+  optionId?: AiModelOptionId;
+}
 
 export interface PerformAnalysisResult {
   aiResult: AiResult; // raw (schema-valid) model output
@@ -11,22 +22,29 @@ export interface PerformAnalysisResult {
   scoreAdjustments: string[];
   rawResponse: string;
   repaired: boolean;
+  provider: AiProvider;
   model: string;
+  optionId: AiModelOptionId;
   piiRemoved: string[];
 }
 
 /**
  * End-to-end analysis pipeline shared by the analyze and reanalyze routes:
- * sanitize résumé -> call model -> deterministic score/override validation.
+ * sanitize résumé -> call selected provider -> deterministic score/override validation.
  */
 export async function performAnalysis(
   input: AnalyzeRequestBody,
-  meta?: { analysisId?: string; tenantId?: string; userId?: string }
+  meta?: PerformAnalysisOptions
 ): Promise<PerformAnalysisResult> {
   const { text: safeResume, removed } = sanitizeResumeText(input.resume_text);
+  const provider = meta?.provider ?? "grok";
+  const optionId = meta?.optionId ?? (provider === "claude" ? "claude" : DEFAULT_AI_MODEL_OPTION);
 
-  const ai = await runAnalysis(
+  const ai = await analyzeCandidate(
     {
+      provider,
+      model: meta?.model,
+      optionId,
       job_id: input.job_id,
       job_title: input.job_title,
       msp_name: input.msp_name,
@@ -52,7 +70,9 @@ export async function performAnalysis(
     scoreAdjustments: adjustments,
     rawResponse: ai.rawResponse,
     repaired: ai.repaired,
+    provider: ai.provider,
     model: ai.model,
+    optionId: ai.optionId,
     piiRemoved: removed,
   };
 }

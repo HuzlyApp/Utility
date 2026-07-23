@@ -31,6 +31,7 @@ export async function saveAnalysis(params: {
   validated: AiResult;
   scoreAdjustments: string[];
   model: string;
+  provider?: string;
   tenantId?: string;
   recruiterId?: string;
 }): Promise<string | null> {
@@ -38,6 +39,8 @@ export async function saveAnalysis(params: {
   if (!db) return null;
 
   const cm = params.validated.candidate_match;
+  const provider = params.provider ?? "grok";
+  const analyzedAt = new Date().toISOString();
   const rows = (await db`
     INSERT INTO candidate_match_analyses (
       tenant_id, job_id, recruiter_id, job_title, msp_name,
@@ -45,7 +48,8 @@ export async function saveAnalysis(params: {
       verified_recruiter_inputs_json, recruiter_notes,
       ai_raw_response_json, validated_result_json,
       overall_match_score, match_category, recommended_action,
-      submission_readiness, confidence_score, analysis_version, model_name
+      submission_readiness, confidence_score, analysis_version, model_name,
+      ai_provider, ai_model, analysis_status, analyzed_at
     ) VALUES (
       ${params.tenantId ?? "default"}, ${params.input.job_id ?? null},
       ${params.recruiterId ?? null}, ${params.input.job_title ?? null},
@@ -59,7 +63,8 @@ export async function saveAnalysis(params: {
       ${cm.recommended_action},
       ${params.validated.submission_readiness.readiness_status},
       ${cm.confidence_score}, ${params.validated.analysis_version},
-      ${params.model}
+      ${params.model},
+      ${provider}, ${params.model}, ${"completed"}, ${analyzedAt}
     )
     RETURNING id
   `) as { id: string }[];

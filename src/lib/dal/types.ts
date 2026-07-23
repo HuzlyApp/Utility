@@ -117,4 +117,6 @@ export interface RankedCandidateRow {
   disposition: string | null;
   analyzed_at: string | null;
   updated_at: string;
+  ai_provider: string | null;
+  ai_model: string | null;
 }
