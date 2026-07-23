@@ -31,10 +31,16 @@ import {
   type ProviderAvailability,
 } from "@/components/workspace/ai-model-selector";
 import { useAiModelSelection } from "@/hooks/use-ai-model-selection";
+import { AnalysisProgressBar, stageFromEvent } from "@/components/workspace/analysis-progress";
 import {
-  AnalysisProgressBar,
-  useEstimatedAnalysisPercent,
-} from "@/components/workspace/analysis-progress";
+  STAGE_PROGRESS,
+  type AnalysisProgressStage,
+} from "@/lib/analysis-stages";
+import {
+  analyzeCandidateStream,
+  AnalyzeRequestError,
+} from "@/lib/client/analyze-candidate";
+import { notifyWorkspaceCandidatesChanged } from "@/lib/workspace-events";
 
 interface CandidateProps {
   id: string;
@@ -111,7 +117,23 @@ export function CandidateDetail({
   const [verified, setVerified] = useState<VerifiedRecruiterInputs>(candidate.verified_information ?? {});
   const [savingCandidate, setSavingCandidate] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
-  const estimatePercent = useEstimatedAnalysisPercent(reanalyzing);
+  const [analysisStage, setAnalysisStage] = useState<{
+    stage: AnalysisProgressStage;
+    percent: number;
+    label: string;
+  } | null>(null);
+
+  // Reconcile local form state when the server props refresh after save/reanalyze.
+  React.useEffect(() => {
+    setName(candidate.full_name ?? "");
+    setEmail(candidate.email ?? "");
+    setPhone(candidate.phone ?? "");
+    setSpecialty(candidate.specialty ?? "");
+    setLocation(candidate.location ?? "");
+    setResumeText(candidate.extracted_resume_text ?? "");
+    setNotes(candidate.recruiter_notes ?? "");
+    setVerified(candidate.verified_information ?? {});
+  }, [candidate]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -158,7 +180,8 @@ export function CandidateDetail({
         body: JSON.stringify(patch),
       });
       if (!res.ok) throw new Error();
-      toast(message, "success");
+      toast(message || "Candidate saved", "success");
+      if (workspaceId) notifyWorkspaceCandidatesChanged(workspaceId);
       router.refresh();
     } catch {
       toast("Could not save changes.", "error");
@@ -181,26 +204,41 @@ export function CandidateDetail({
       return;
     }
     setReanalyzing(true);
+    setAnalysisStage({
+      stage: "preparing",
+      percent: STAGE_PROGRESS.preparing,
+      label: "Preparing candidate data…",
+    });
     try {
-      const res = await fetch(
-        `/api/workspaces/${workspaceId}/candidates/${candidate.id}/analyze`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody),
-        }
-      );
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        toast(data.error ?? "Analysis failed.", "error");
-        return;
-      }
+      await analyzeCandidateStream({
+        workspaceId,
+        candidateId: candidate.id,
+        body: requestBody,
+        onProgress: (event) => {
+          const mapped = stageFromEvent(event);
+          setAnalysisStage(mapped);
+        },
+      });
+      setAnalysisStage({
+        stage: "completed",
+        percent: 100,
+        label: "Analysis completed",
+      });
       toast(`Assessment updated with ${option.label}.`, "success");
+      notifyWorkspaceCandidatesChanged(workspaceId);
       router.refresh();
-    } catch {
-      toast("Analysis failed.", "error");
+    } catch (err) {
+      const message =
+        err instanceof AnalyzeRequestError ? err.message : "Analysis failed.";
+      setAnalysisStage({
+        stage: "failed",
+        percent: 0,
+        label: message,
+      });
+      toast(message, "error");
     } finally {
       setReanalyzing(false);
+      setAnalysisStage(null);
     }
   }
 
@@ -318,7 +356,7 @@ export function CandidateDetail({
               />
               <Button onClick={reanalyze} disabled={reanalyzing || !workspaceId}>
                 {reanalyzing
-                  ? `${option.loadingLabel.replace(/…$/, "")} ${estimatePercent}%`
+                  ? analysisStage?.label ?? option.loadingLabel
                   : analysis
                     ? "Reanalyze"
                     : "Analyze"}
@@ -327,11 +365,16 @@ export function CandidateDetail({
           </CardBody>
         </Card>
 
-        {reanalyzing && (
+        {reanalyzing && analysisStage && (
           <AnalysisProgressBar
-            percent={estimatePercent}
-            label={option.loadingLabel}
-            detail="Percentage is an estimate until the model finishes this candidate."
+            percent={analysisStage.percent}
+            label={analysisStage.label}
+            indeterminate={analysisStage.stage === "analyzing"}
+            detail={
+              analysisStage.stage === "failed"
+                ? "Analysis failed — try again when ready."
+                : undefined
+            }
           />
         )}
 
@@ -418,11 +461,11 @@ export function CandidateDetail({
                     specialty,
                     location,
                   },
-                  "Candidate details saved."
+                  "Candidate saved"
                 )
               }
             >
-              Save details
+              {savingCandidate ? "Saving candidate…" : "Save details"}
             </Button>
           </CardBody>
         </Card>
@@ -473,10 +516,10 @@ export function CandidateDetail({
               size="sm"
               disabled={savingCandidate}
               onClick={() =>
-                saveCandidate({ extracted_resume_text: resumeText }, "Extracted text updated.")
+                saveCandidate({ extracted_resume_text: resumeText }, "Candidate saved")
               }
             >
-              Correct Extracted Text
+              {savingCandidate ? "Saving candidate…" : "Correct Extracted Text"}
             </Button>
           </CardBody>
         </Card>

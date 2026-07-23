@@ -62,6 +62,19 @@ body {
   animation: fade-in 0.2s ease-out both;
 }
 
+@keyframes analysis-progress-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.analysis-progress-indeterminate {
+  animation: analysis-progress-slide 1.4s ease-in-out infinite;
+}
+
 /* Respect reduced-motion preferences (spec §22/§25). */
 @media (prefers-reduced-motion: reduce) {
   *,

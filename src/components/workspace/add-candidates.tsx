@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Card, CardBody, Badge, Button, TextInput, TextArea } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
 import { ALLOWED_EXTS, IMAGE_EXTS, ACCEPT_ATTR, extOf } from "@/components/jobs/upload-constants";
+import { notifyWorkspaceCandidatesChanged } from "@/lib/workspace-events";
 
 type SubStatus =
   | "QUEUED"
@@ -138,13 +139,30 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
   async function uploadOne(sub: Submission): Promise<SubStatus> {
     const hasImages = sub.files.some((f) => IMAGE_EXTS.includes(extOf(f.name)));
     setSubs((prev) =>
-      prev.map((s) => (s.id === sub.id ? { ...s, status: hasImages ? "OCR_PROCESSING" : "UPLOADING" } : s))
+      prev.map((s) =>
+        s.id === sub.id
+          ? {
+              ...s,
+              status: hasImages ? "OCR_PROCESSING" : "UPLOADING",
+              message: hasImages ? "Extracting résumé content…" : "Uploading résumé…",
+            }
+          : s
+      )
     );
     try {
       const fd = new FormData();
       fd.append("name", sub.name);
       if (sub.pastedText) fd.append("pasted_text", sub.pastedText);
       for (const f of sub.files) fd.append("files", f, f.name);
+
+      // Move to extracting while the server creates the DB record + processes files.
+      setSubs((prev) =>
+        prev.map((s) =>
+          s.id === sub.id
+            ? { ...s, status: "EXTRACTING", message: "Saving candidate…" }
+            : s
+        )
+      );
 
       const res = await fetch(`/api/workspaces/${workspaceId}/candidates`, {
         method: "POST",
@@ -153,16 +171,30 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
       const data = await res.json();
       if (!res.ok || !data.success) {
         setSubs((prev) =>
-          prev.map((s) => (s.id === sub.id ? { ...s, status: "FAILED", message: data.error } : s))
+          prev.map((s) =>
+            s.id === sub.id
+              ? { ...s, status: "FAILED", message: data.error ?? "Upload failed." }
+              : s
+          )
         );
         return "FAILED";
       }
       const status = data.status as SubStatus;
-      setSubs((prev) => prev.map((s) => (s.id === sub.id ? { ...s, status } : s)));
+      setSubs((prev) =>
+        prev.map((s) =>
+          s.id === sub.id
+            ? { ...s, status, message: "Candidate saved" }
+            : s
+        )
+      );
+      // Persist immediately in ranking: refresh sibling table from the DB.
+      notifyWorkspaceCandidatesChanged(workspaceId);
       return status;
     } catch {
       setSubs((prev) =>
-        prev.map((s) => (s.id === sub.id ? { ...s, status: "FAILED", message: "Upload failed." } : s))
+        prev.map((s) =>
+          s.id === sub.id ? { ...s, status: "FAILED", message: "Upload failed." } : s
+        )
       );
       return "FAILED";
     }
@@ -182,9 +214,16 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
       if (result === "FAILED") failed += 1;
     }
     setUploading(false);
-    if (failed === 0) toast("All candidates added.", "success");
-    else toast(`${pending.length - failed} added, ${failed} failed.`, failed === pending.length ? "error" : "info");
+    // Drop successfully persisted candidates from the ephemeral queue.
+    setSubs((prev) => prev.filter((s) => s.status === "QUEUED" || s.status === "FAILED"));
+    notifyWorkspaceCandidatesChanged(workspaceId);
     router.refresh();
+    if (failed === 0) toast("All candidates added.", "success");
+    else
+      toast(
+        `${pending.length - failed} added, ${failed} failed.`,
+        failed === pending.length ? "error" : "info"
+      );
   }
 
   const names = subs.map((s) => s.name.trim().toLowerCase());
