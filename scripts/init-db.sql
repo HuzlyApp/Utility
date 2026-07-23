@@ -25,6 +25,11 @@ CREATE TABLE IF NOT EXISTS candidate_match_analyses (
   recruiter_disposition_notes TEXT,
   analysis_version TEXT DEFAULT '1.0',
   model_name TEXT,
+  ai_provider TEXT,
+  ai_model TEXT,
+  analysis_status TEXT,
+  analysis_error TEXT,
+  analyzed_at TIMESTAMPTZ,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

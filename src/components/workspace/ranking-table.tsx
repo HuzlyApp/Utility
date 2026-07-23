@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Badge, Button } from "@/components/ui/primitives";
@@ -8,6 +8,17 @@ import { useToast } from "@/components/ui/toast";
 import { DISPLAY_CATEGORY, type MatchCategory } from "@/lib/types";
 import type { RankedCandidateRow } from "@/lib/dal/types";
 import { CompareDialog } from "./compare-dialog";
+import {
+  AiModelSelector,
+  ModelBadge,
+  type ProviderAvailability,
+} from "./ai-model-selector";
+import { useAiModelSelection } from "@/hooks/use-ai-model-selection";
+import {
+  AnalysisProgressBar,
+  analysisPercent,
+  useEstimatedAnalysisPercent,
+} from "./analysis-progress";
 
 type SortKey = "score" | "name" | "category" | "readiness" | "verification" | "date";
 
@@ -62,6 +73,36 @@ export function RankingTable({
   const [analyzing, setAnalyzing] = useState(false);
   const [progress, setProgress] = useState({ total: 0, done: 0, running: 0 });
   const [compareOpen, setCompareOpen] = useState(false);
+  const { optionId, setOptionId, option, requestBody } = useAiModelSelection();
+  const [availability, setAvailability] = useState<ProviderAvailability | null>(null);
+  const singleEstimate = useEstimatedAnalysisPercent(
+    analyzing && progress.total === 1 && progress.done === 0
+  );
+  const batchPercent =
+    progress.total > 1
+      ? analysisPercent(progress.done, progress.total, progress.running)
+      : progress.total === 1 && progress.done >= 1
+        ? 100
+        : singleEstimate;
+  const displayPercent = analyzing ? batchPercent : 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/ai/providers");
+        const data = await res.json();
+        if (!cancelled && res.ok && data.success) {
+          setAvailability(data.availability as ProviderAvailability);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function refresh() {
     try {
@@ -80,7 +121,11 @@ export function RankingTable({
     try {
       const res = await fetch(
         `/api/workspaces/${workspaceId}/candidates/${candidateId}/analyze`,
-        { method: "POST" }
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        }
       );
       const data = await res.json();
       if (!res.ok || !data.success) {
@@ -99,7 +144,36 @@ export function RankingTable({
     }
   }
 
+  async function analyzeSingle(candidateId: string) {
+    if (availability && !availability[option.provider]?.available) {
+      toast(
+        availability[option.provider]?.message ??
+          `${option.label} is unavailable.`,
+        "error"
+      );
+      return;
+    }
+    setAnalyzing(true);
+    setProgress({ total: 1, done: 0, running: 1 });
+    const ok = await analyzeOne(candidateId);
+    setProgress({ total: 1, done: 1, running: 0 });
+    setAnalyzing(false);
+    await refresh();
+    router.refresh();
+    if (ok) toast("Analysis complete.", "success");
+  }
+
   async function analyzeAllReady() {
+    const selectedProvider = option.provider;
+    if (availability && !availability[selectedProvider]?.available) {
+      toast(
+        availability[selectedProvider]?.message ??
+          `${option.label} is unavailable.`,
+        "error"
+      );
+      return;
+    }
+
     const ready = rows.filter((r) => r.status === "READY" || r.status === "NEEDS_REVIEW");
     if (ready.length === 0) {
       toast("No candidates are ready to analyze.", "info");
@@ -108,6 +182,7 @@ export function RankingTable({
     setAnalyzing(true);
     setProgress({ total: ready.length, done: 0, running: 0 });
 
+    // Keep concurrency low to avoid provider rate limits across a batch.
     const concurrency = 2;
     let index = 0;
     let done = 0;
@@ -195,10 +270,21 @@ export function RankingTable({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-end gap-3">
+        <AiModelSelector
+          value={optionId}
+          onChange={setOptionId}
+          disabled={analyzing}
+          availability={availability}
+        />
         <Button onClick={analyzeAllReady} disabled={analyzing}>
-          {analyzing ? "Analyzing…" : "Analyze All Ready Candidates"}
+          {analyzing
+            ? `${option.loadingLabel.replace(/…$/, "")} ${displayPercent}%`
+            : "Analyze All Ready Candidates"}
         </Button>
+        <span className="pb-2 text-xs text-slate-500">
+          Using <span className="font-medium text-slate-700">{option.label}</span>
+        </span>
         {selectedIds.length >= 2 && selectedEntries.length >= 2 && (
           <Button variant="outline" onClick={() => setCompareOpen(true)}>
             Compare Selected ({selectedEntries.length})
@@ -256,10 +342,15 @@ export function RankingTable({
       </div>
 
       {analyzing && (
-        <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800">
-          Analyzing {progress.total} candidates — {progress.done} completed ·{" "}
-          {progress.running} processing · {Math.max(progress.total - progress.done - progress.running, 0)} waiting
-        </div>
+        <AnalysisProgressBar
+          percent={displayPercent}
+          label={option.loadingLabel}
+          detail={
+            progress.total > 1
+              ? `${progress.done} of ${progress.total} candidates completed · ${progress.running} processing · ${Math.max(progress.total - progress.done - progress.running, 0)} waiting`
+              : "Working on this candidate — percentage is an estimate until the model finishes."
+          }
+        />
       )}
 
       <div className="overflow-x-auto">
@@ -269,6 +360,7 @@ export function RankingTable({
               <th className="px-2 py-2">#</th>
               <th className="px-2 py-2">Candidate</th>
               <th className="px-2 py-2">Score</th>
+              <th className="px-2 py-2">Model</th>
               <th className="px-2 py-2">Category</th>
               <th className="px-2 py-2" title="Mandatory confirmed">Conf.</th>
               <th className="px-2 py-2" title="Needs verification">Verify</th>
@@ -313,6 +405,13 @@ export function RankingTable({
                     <span className="text-slate-300">—</span>
                   )}
                 </td>
+                <td className="px-2 py-2">
+                  {r.latest_analysis_id ? (
+                    <ModelBadge provider={r.ai_provider} model={r.ai_model} />
+                  ) : (
+                    <span className="text-slate-300">—</span>
+                  )}
+                </td>
                 <td className="px-2 py-2 text-slate-600">
                   {r.match_category ? DISPLAY_CATEGORY[r.match_category as MatchCategory] ?? r.match_category : "—"}
                 </td>
@@ -333,10 +432,14 @@ export function RankingTable({
                     <Button
                       size="sm"
                       variant="secondary"
-                      onClick={() => analyzeOne(r.candidate_id).then(refresh)}
+                      onClick={() => analyzeSingle(r.candidate_id)}
                       disabled={analyzing || r.status === "ANALYZING"}
                     >
-                      {r.latest_analysis_id ? "Reanalyze" : "Analyze"}
+                      {r.status === "ANALYZING"
+                        ? `${displayPercent}%`
+                        : r.latest_analysis_id
+                          ? "Reanalyze"
+                          : "Analyze"}
                     </Button>
                     <Link
                       href={`/candidates/${r.candidate_id}?w=${workspaceId}`}

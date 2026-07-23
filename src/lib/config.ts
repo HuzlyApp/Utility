@@ -25,6 +25,16 @@ export const config = {
   // Maximum retries for temporary failures
   xaiMaxRetries: Number(process.env.XAI_MAX_RETRIES ?? "1"),
 
+  // Claude / Anthropic (server-only; never expose to the client)
+  claudeApiKey: process.env.CLAUDE_API_KEY ?? process.env.ANTHROPIC_API_KEY ?? "",
+  claudeModel:
+    process.env.CLAUDE_MODEL ??
+    process.env.ANTHROPIC_MODEL ??
+    "claude-sonnet-4-5-20250929",
+  claudeTimeoutMs: Number(process.env.CLAUDE_TIMEOUT_MS ?? "180000"),
+  claudeMaxTokens: Number(process.env.CLAUDE_MAX_TOKENS ?? "8192"),
+  claudeTemperature: Number(process.env.CLAUDE_TEMPERATURE ?? "0"),
+
   // Neon Auth (Managed Better Auth)
   neonAuthBaseUrl: process.env.NEON_AUTH_BASE_URL ?? process.env.AUTH_URL ?? "",
   neonAuthCookieSecret: process.env.NEON_AUTH_COOKIE_SECRET ?? "",

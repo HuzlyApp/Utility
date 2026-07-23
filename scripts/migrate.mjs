@@ -1,4 +1,4 @@
-// Applies scripts/dashboard-schema.sql to the Neon database.
+// Applies schema SQL files to the Neon database.
 // Usage: node scripts/migrate.mjs
 import { neon } from "@neondatabase/serverless";
 import fs from "node:fs";
@@ -20,14 +20,18 @@ if (!url) {
 }
 
 const sql = neon(url);
-const file = new URL("./dashboard-schema.sql", import.meta.url);
-const text = fs.readFileSync(file, "utf8");
+const files = [
+  new URL("./dashboard-schema.sql", import.meta.url),
+  new URL("./ai-provider-schema.sql", import.meta.url),
+];
 
 // Naive splitter: safe here because the schema has no PL/pgSQL bodies.
-const statements = text
-  .split(/;\s*(?:\r?\n|$)/)
-  .map((s) => s.replace(/^\s*--.*$/gm, "").trim())
-  .filter((s) => s.length > 0);
+function statementsFrom(text) {
+  return text
+    .split(/;\s*(?:\r?\n|$)/)
+    .map((s) => s.replace(/^\s*--.*$/gm, "").trim())
+    .filter((s) => s.length > 0);
+}
 
 // Invoke the neon tagged-template client with a single literal chunk (no params).
 function run(stmt) {
@@ -36,13 +40,16 @@ function run(stmt) {
 }
 
 let applied = 0;
-for (const stmt of statements) {
-  try {
-    await run(stmt);
-    applied += 1;
-  } catch (err) {
-    console.error("Failed statement:\n", stmt, "\n", err.message);
-    process.exit(1);
+for (const file of files) {
+  const text = fs.readFileSync(file, "utf8");
+  for (const stmt of statementsFrom(text)) {
+    try {
+      await run(stmt);
+      applied += 1;
+    } catch (err) {
+      console.error("Failed statement:\n", stmt, "\n", err.message);
+      process.exit(1);
+    }
   }
 }
 

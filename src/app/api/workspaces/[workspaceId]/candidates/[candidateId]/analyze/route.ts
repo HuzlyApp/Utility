@@ -1,4 +1,4 @@
-import { ok, fail } from "@/lib/http";
+import { ok, fail, logServerError } from "@/lib/http";
 import { withUser } from "@/lib/api-helpers";
 import { getWorkspace } from "@/lib/dal/workspaces";
 import {
@@ -12,6 +12,16 @@ import { getEntityImageBytes } from "@/lib/dal/fileStore";
 import { saveCandidateAnalysis } from "@/lib/dal/analyses";
 import { performAnalysis } from "@/lib/analyze";
 import { visionTranscribe } from "@/lib/files";
+import {
+  resolveAiSelection,
+  ProviderUnavailableError,
+  ConfigurationError,
+  RateLimitError,
+  TimeoutError,
+  EmptyResponseError,
+  AiValidationError,
+  AiServiceError,
+} from "@/lib/ai";
 import type { AnalyzeRequestBody } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -19,7 +29,7 @@ export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 export async function POST(
-  _req: Request,
+  req: Request,
   { params }: { params: { workspaceId: string; candidateId: string } }
 ) {
   return withUser("candidates.analyze", async (user) => {
@@ -35,12 +45,23 @@ export async function POST(
     const jmc = await getJobCandidate(user, params.workspaceId, params.candidateId);
     if (!jmc) return fail("Candidate is not attached to this workspace.", 404, "NOT_ATTACHED");
 
+    let body: Record<string, unknown> = {};
+    try {
+      const text = await req.text();
+      if (text.trim()) body = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return fail("Invalid JSON body.", 400, "INVALID_JSON");
+    }
+
+    const selection = resolveAiSelection(body);
+
     await setJobCandidateStatus(user, jmc.id, "ANALYZING");
 
     try {
       let resumeText = (candidate.extracted_resume_text ?? "").trim();
 
       // Controlled image fallback (spec §9): only when reliable text is missing.
+      // Vision remains Grok-based; analysis provider is independent.
       if (resumeText.length < 40) {
         const images = await getEntityImageBytes(user, "candidate", params.candidateId);
         if (images.length > 0) {
@@ -89,6 +110,9 @@ export async function POST(
       const analysis = await performAnalysis(input, {
         tenantId: user.tenantId,
         userId: user.id,
+        provider: selection.provider,
+        model: selection.model,
+        optionId: selection.optionId,
       });
 
       const analysisId = await saveCandidateAnalysis({
@@ -101,6 +125,8 @@ export async function POST(
         validated: analysis.validatedResult,
         scoreAdjustments: analysis.scoreAdjustments,
         model: analysis.model,
+        provider: analysis.provider,
+        analysisStatus: "completed",
       });
 
       await setLatestAnalysis(user, jmc.id, analysisId);
@@ -112,9 +138,46 @@ export async function POST(
         overall_match_score: cm.recommended_overall_match_score,
         match_category: cm.match_category,
         submission_readiness: analysis.validatedResult.submission_readiness.readiness_status,
+        ai_provider: analysis.provider,
+        ai_model: analysis.model,
       });
     } catch (err) {
       await setJobCandidateStatus(user, jmc.id, "FAILED");
+
+      if (err instanceof ProviderUnavailableError) {
+        return fail(err.message, 503, "PROVIDER_UNAVAILABLE");
+      }
+      if (err instanceof ConfigurationError) {
+        logServerError("workspace.analyze:config", err.message);
+        return fail(err.message, 503, "CONFIGURATION_ERROR");
+      }
+      if (err instanceof RateLimitError) {
+        return fail(err.message, 429, "RATE_LIMITED");
+      }
+      if (err instanceof TimeoutError) {
+        return fail(err.message, 504, "TIMEOUT");
+      }
+      if (err instanceof EmptyResponseError) {
+        return fail(err.message, 502, "EMPTY_RESPONSE");
+      }
+      if (err instanceof AiValidationError) {
+        logServerError("workspace.analyze:validation", err.details);
+        return fail(
+          "The analysis could not be completed because the AI response was invalid. Please try again.",
+          502,
+          "INVALID_AI_RESPONSE"
+        );
+      }
+      if (err instanceof AiServiceError) {
+        logServerError("workspace.analyze:service", err.originalError);
+        return fail(
+          err.message ||
+            "The analysis service encountered an error. Please try again.",
+          502,
+          "AI_SERVICE_ERROR"
+        );
+      }
+
       throw err;
     }
   });

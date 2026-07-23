@@ -1,7 +1,11 @@
 import type { NextRequest } from "next/server";
 import { performAnalysis } from "@/lib/analyze";
 import { saveAnalysis, addAuditLog } from "@/lib/db";
-import { AiValidationError } from "@/lib/ai";
+import {
+  AiValidationError,
+  ProviderUnavailableError,
+  resolveAiSelection,
+} from "@/lib/ai";
 import { ok, fail, logServerError } from "@/lib/http";
 import { summarizeMandatory } from "@/lib/scoring";
 import type { AnalyzeRequestBody } from "@/lib/types";
@@ -17,7 +21,11 @@ export async function POST(
   { params }: { params: { analysisId: string } }
 ) {
   try {
-    const body = (await req.json()) as AnalyzeRequestBody;
+    const body = (await req.json()) as AnalyzeRequestBody & {
+      ai_provider?: string;
+      ai_model?: string;
+      ai_model_option?: string;
+    };
 
     if (!body.job_description_text?.trim() || !body.resume_text?.trim()) {
       return fail(
@@ -27,7 +35,12 @@ export async function POST(
       );
     }
 
-    const analysis = await performAnalysis(body);
+    const selection = resolveAiSelection(body);
+    const analysis = await performAnalysis(body, {
+      provider: selection.provider,
+      model: selection.model,
+      optionId: selection.optionId,
+    });
 
     let newAnalysisId: string | null = null;
     try {
@@ -37,11 +50,16 @@ export async function POST(
         validated: analysis.validatedResult,
         scoreAdjustments: analysis.scoreAdjustments,
         model: analysis.model,
+        provider: analysis.provider,
       });
       if (newAnalysisId) {
         await addAuditLog(newAnalysisId, {
           action: "REANALYZED_FROM",
-          newValue: { previous_analysis_id: params.analysisId },
+          newValue: {
+            previous_analysis_id: params.analysisId,
+            ai_provider: analysis.provider,
+            ai_model: analysis.model,
+          },
         });
       }
     } catch (dbErr) {
@@ -51,15 +69,22 @@ export async function POST(
     return ok({
       analysis_id: newAnalysisId,
       previous_analysis_id: params.analysisId,
+      ai_result: analysis.aiResult,
+      // Legacy alias kept for older clients
       grok_result: analysis.aiResult,
       validated_result: analysis.validatedResult,
       score_adjustments: analysis.scoreAdjustments,
+      ai_provider: analysis.provider,
+      ai_model: analysis.model,
       mandatory_summary: summarizeMandatory(
         analysis.validatedResult.mandatory_requirements
       ),
       created_at: new Date().toISOString(),
     });
   } catch (err) {
+    if (err instanceof ProviderUnavailableError) {
+      return fail(err.message, 503, "PROVIDER_UNAVAILABLE");
+    }
     if (err instanceof AiValidationError) {
       logServerError("reanalyze:validation", err.details);
       return fail(

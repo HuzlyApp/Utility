@@ -48,6 +48,14 @@ export const screeningQuestionSchema = z.object({
 });
 export type AiScreeningQuestion = z.infer<typeof screeningQuestionSchema>;
 
+const stringOrObjectToString = z.union([
+  z.string(),
+  z.record(z.unknown()).transform((obj) => {
+    const text = obj.text ?? obj.risk ?? obj.gap ?? obj.strength ?? obj.message;
+    return typeof text === "string" ? text : JSON.stringify(obj);
+  }),
+]);
+
 export const aiResultSchema = z.object({
   analysis_version: z.string().default("1.0"),
   job: z.object({
@@ -87,8 +95,9 @@ export const aiResultSchema = z.object({
   }),
   mandatory_requirements: z.array(requirementSchema).default([]),
   preferred_requirements: z.array(requirementSchema).default([]),
-  strengths: z.array(z.string()).default([]),
-  gaps_and_risks: z.array(z.string()).default([]),
+  // Coerce object-shaped items some providers emit into plain strings.
+  strengths: z.array(stringOrObjectToString).default([]),
+  gaps_and_risks: z.array(stringOrObjectToString).default([]),
   screening_questions: z.array(screeningQuestionSchema).max(10).default([]),
   submission_readiness: z.object({
     ready_to_submit: z.boolean().default(false),
