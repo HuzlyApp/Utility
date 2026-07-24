@@ -35,7 +35,7 @@ export function AnalysisLoadingState() {
             Analyzing Candidate Match
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Grok AI is comparing the résumé against the job requirements.
+            Claude is comparing the résumé against the job requirements.
           </p>
         </div>
 

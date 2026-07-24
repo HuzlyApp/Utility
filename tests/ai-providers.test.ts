@@ -26,8 +26,8 @@ const claudeComplete = vi.fn();
 vi.mock("@/lib/ai/providers/grok", () => ({
   grokProvider: {
     provider: "grok",
-    isConfigured: () => true,
-    unavailableMessage: () => "Grok unavailable",
+    isConfigured: () => false,
+    unavailableMessage: () => "Grok analysis is disabled. Use Claude.",
     resolveModel: (m?: string) => m || "grok-4.5",
     complete: (...args: unknown[]) => grokComplete(...args),
   },
@@ -44,9 +44,9 @@ vi.mock("@/lib/ai/providers/claude", () => ({
 }));
 
 import { analyzeCandidate } from "@/lib/ai/analyze-candidate";
-import { resolveAiSelection } from "@/lib/ai/selection";
+import { resolveAiSelection, getProviderAvailability } from "@/lib/ai/selection";
 import { parseAiResult } from "@/lib/schema";
-import { getProviderAvailability } from "@/lib/ai/selection";
+import { ProviderUnavailableError } from "@/lib/ai/errors";
 
 const baseArgs = {
   job_description_text: "Need CT tech with ARRT(CT).",
@@ -64,21 +64,16 @@ describe("AI model selection routing", () => {
     vi.clearAllMocks();
   });
 
-  it("uses Grok when Grok 4.5 is selected", async () => {
-    const payload = JSON.stringify(makeAiResult());
-    grokComplete.mockResolvedValue({ content: payload, model: "grok-4.5" });
+  it("rejects Grok because analysis with Grok is disabled", async () => {
+    await expect(
+      analyzeCandidate({
+        ...baseArgs,
+        provider: "grok",
+      })
+    ).rejects.toBeInstanceOf(ProviderUnavailableError);
 
-    const result = await analyzeCandidate({
-      ...baseArgs,
-      provider: "grok",
-      optionId: "grok-4.5",
-    });
-
-    expect(grokComplete).toHaveBeenCalledTimes(1);
+    expect(grokComplete).not.toHaveBeenCalled();
     expect(claudeComplete).not.toHaveBeenCalled();
-    expect(result.provider).toBe("grok");
-    expect(result.model).toBe("grok-4.5");
-    expect(result.aiResult.candidate_match).toBeDefined();
   });
 
   it("uses Claude when Claude is selected", async () => {
@@ -100,53 +95,13 @@ describe("AI model selection routing", () => {
     expect(result.model).toBe("claude-sonnet-4-5-20250929");
   });
 
-  it("never calls the unselected provider", async () => {
-    grokComplete.mockResolvedValue({
-      content: JSON.stringify(makeAiResult()),
-      model: "grok-4.5",
-    });
-
-    await analyzeCandidate({ ...baseArgs, provider: "grok" });
-    expect(claudeComplete).not.toHaveBeenCalled();
-
-    claudeComplete.mockResolvedValue({
-      content: JSON.stringify(makeAiResult()),
-      model: "claude-sonnet-4-5-20250929",
-    });
-    await analyzeCandidate({ ...baseArgs, provider: "claude" });
-    expect(grokComplete).toHaveBeenCalledTimes(1);
-  });
-
-  it("both providers return the same normalized structure", async () => {
-    const payload = JSON.stringify(makeAiResult());
-    grokComplete.mockResolvedValue({ content: payload, model: "grok-4.5" });
-    claudeComplete.mockResolvedValue({
-      content: payload,
-      model: "claude-sonnet-4-5-20250929",
-    });
-
-    const grok = await analyzeCandidate({ ...baseArgs, provider: "grok" });
-    const claude = await analyzeCandidate({ ...baseArgs, provider: "claude" });
-
-    expect(Object.keys(grok.aiResult).sort()).toEqual(
-      Object.keys(claude.aiResult).sort()
-    );
-    expect(grok.aiResult.candidate_match.match_category).toBe(
-      claude.aiResult.candidate_match.match_category
-    );
-    expect(grok.aiResult.strengths).toBeDefined();
-    expect(grok.aiResult.gaps_and_risks).toBeDefined();
-    expect(grok.aiResult.screening_questions).toBeDefined();
-    expect(grok.aiResult.experience_analysis).toBeDefined();
-  });
-
   it("rejects invalid AI responses safely", async () => {
-    grokComplete
-      .mockResolvedValueOnce({ content: "{not-json", model: "grok-4.5" })
-      .mockResolvedValueOnce({ content: "{still-bad", model: "grok-4.5" });
+    claudeComplete
+      .mockResolvedValueOnce({ content: "{not-json", model: "claude-sonnet-4-5-20250929" })
+      .mockResolvedValueOnce({ content: "{still-bad", model: "claude-sonnet-4-5-20250929" });
 
     await expect(
-      analyzeCandidate({ ...baseArgs, provider: "grok" })
+      analyzeCandidate({ ...baseArgs, provider: "claude" })
     ).rejects.toMatchObject({ name: "AiValidationError" });
   });
 
@@ -171,15 +126,24 @@ describe("AI model selection routing", () => {
 });
 
 describe("resolveAiSelection", () => {
-  it("defaults to Grok 4.5 for backward compatibility", () => {
+  it("defaults to Claude (Grok disabled)", () => {
     expect(resolveAiSelection({})).toEqual({
-      provider: "grok",
-      model: "grok-4.5",
-      optionId: "grok-4.5",
+      provider: "claude",
+      model: "claude-sonnet-4-5-20250929",
+      optionId: "claude",
     });
     expect(resolveAiSelection(null)).toMatchObject({
-      provider: "grok",
-      optionId: "grok-4.5",
+      provider: "claude",
+      optionId: "claude",
+    });
+  });
+
+  it("remaps former Grok option requests to Claude", () => {
+    expect(
+      resolveAiSelection({ ai_model_option: "grok-4.5", ai_provider: "grok" })
+    ).toMatchObject({
+      provider: "claude",
+      optionId: "claude",
     });
   });
 
@@ -201,18 +165,18 @@ describe("batch analysis independence", () => {
     for (const id of candidates) {
       try {
         if (id === "b") throw new Error("provider failed");
-        results.push({ ok: true, provider: "grok" });
+        results.push({ ok: true, provider: "claude" });
       } catch {
-        results.push({ ok: false, provider: "grok" });
+        results.push({ ok: false, provider: "claude" });
       }
     }
 
     expect(results).toEqual([
-      { ok: true, provider: "grok" },
-      { ok: false, provider: "grok" },
-      { ok: true, provider: "grok" },
+      { ok: true, provider: "claude" },
+      { ok: false, provider: "claude" },
+      { ok: true, provider: "claude" },
     ]);
-    expect(results.every((r) => r.provider === "grok")).toBe(true);
+    expect(results.every((r) => r.provider === "claude")).toBe(true);
   });
 
   it("multiple candidates use the same selected model", () => {
@@ -234,6 +198,7 @@ describe("API key exposure safety", () => {
     expect(serialized).not.toContain("test-xai-key");
     expect(serialized).not.toContain("test-claude-key");
     expect(serialized).not.toMatch(/sk-/i);
+    expect(availability.grok.available).toBe(false);
   });
 });
 

@@ -1,6 +1,10 @@
 import { ok } from "@/lib/http";
 import { withUser } from "@/lib/api-helpers";
-import { getProviderAvailability, AI_MODEL_OPTIONS } from "@/lib/ai";
+import {
+  getProviderAvailability,
+  AI_MODEL_OPTIONS,
+  DEFAULT_AI_MODEL_OPTION,
+} from "@/lib/ai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +22,7 @@ export async function GET() {
         message: availability[o.provider].message,
       })),
       availability,
-      default_option: "grok-4.5",
+      default_option: DEFAULT_AI_MODEL_OPTION,
     });
   });
 }

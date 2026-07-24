@@ -37,13 +37,15 @@ export async function performAnalysis(
   meta?: PerformAnalysisOptions
 ): Promise<PerformAnalysisResult> {
   const { text: safeResume, removed } = sanitizeResumeText(input.resume_text);
-  const provider = meta?.provider ?? "grok";
-  const optionId = meta?.optionId ?? (provider === "claude" ? "claude" : DEFAULT_AI_MODEL_OPTION);
+  // Grok analysis is disabled — match analysis always uses Claude.
+  const provider: AiProvider = "claude";
+  const optionId = meta?.optionId ?? DEFAULT_AI_MODEL_OPTION;
 
   const ai = await analyzeCandidate(
     {
       provider,
-      model: meta?.model,
+      model:
+        meta?.model && !/grok/i.test(meta.model) ? meta.model : undefined,
       optionId,
       job_id: input.job_id,
       job_title: input.job_title,

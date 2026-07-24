@@ -5,14 +5,12 @@ import type { UserPromptArgs } from "@/lib/prompt";
 export const AI_PROVIDERS = ["grok", "claude"] as const;
 export type AiProvider = (typeof AI_PROVIDERS)[number];
 
-/** UI-facing model choices. Default is Grok 4.5 for backward compatibility. */
+/**
+ * UI-facing model choices for analysis.
+ * Grok is disabled — Claude is the only selectable analysis provider.
+ * The "grok" provider type remains for historical analysis records.
+ */
 export const AI_MODEL_OPTIONS = [
-  {
-    id: "grok-4.5",
-    label: "Grok 4.5",
-    provider: "grok" as const,
-    loadingLabel: "Analyzing with Grok 4.5…",
-  },
   {
     id: "claude",
     label: "Claude",
@@ -22,7 +20,10 @@ export const AI_MODEL_OPTIONS = [
 ] as const;
 
 export type AiModelOptionId = (typeof AI_MODEL_OPTIONS)[number]["id"];
-export const DEFAULT_AI_MODEL_OPTION: AiModelOptionId = "grok-4.5";
+export const DEFAULT_AI_MODEL_OPTION: AiModelOptionId = "claude";
+
+/** Former analysis option ids that are no longer selectable. */
+export const DISABLED_AI_MODEL_OPTION_IDS = ["grok-4.5"] as const;
 
 export const ANALYSIS_STATUSES = [
   "pending",
@@ -122,5 +123,5 @@ export function displayLabelForSelection(
     if (model.includes("grok") || model.includes("4.5")) return model.includes("4.5") ? "Grok 4.5" : model;
     return model;
   }
-  return "Grok 4.5";
+  return "Claude";
 }

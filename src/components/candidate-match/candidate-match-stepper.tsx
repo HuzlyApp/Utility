@@ -26,7 +26,7 @@ export const WORKFLOW_STEPS: StepDef[] = [
   {
     id: "result",
     label: "Match Assessment",
-    description: "Review the Grok AI-assisted recommendation.",
+    description: "Review the AI-assisted recommendation.",
   },
 ];
 

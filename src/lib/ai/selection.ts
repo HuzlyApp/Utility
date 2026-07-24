@@ -1,9 +1,7 @@
 import { config } from "@/lib/config";
 import {
-  AI_MODEL_OPTIONS,
   DEFAULT_AI_MODEL_OPTION,
   isAiModelOptionId,
-  isAiProvider,
   type AiModelOptionId,
   type AiProvider,
   type AiSelection,
@@ -17,7 +15,7 @@ export interface ClientAiSelectionBody {
 
 /**
  * Resolve the provider/model selection from a request body.
- * Defaults to Grok 4.5 for backward compatibility with existing clients.
+ * Grok analysis is disabled — always resolves to Claude.
  */
 export function resolveAiSelection(
   body?: ClientAiSelectionBody | null
@@ -27,17 +25,8 @@ export function resolveAiSelection(
     return selectionFromOptionId(optionRaw, body?.ai_model);
   }
 
-  const providerRaw = body?.ai_provider;
-  if (isAiProvider(providerRaw)) {
-    const optionId =
-      providerRaw === "claude" ? "claude" : DEFAULT_AI_MODEL_OPTION;
-    return {
-      provider: providerRaw,
-      model: concreteModel(providerRaw, body?.ai_model),
-      optionId,
-    };
-  }
-
+  // Explicit Grok requests are remapped to Claude (provider disabled).
+  // Unknown option ids / providers also fall through to Claude.
   return selectionFromOptionId(DEFAULT_AI_MODEL_OPTION, body?.ai_model);
 }
 
@@ -45,18 +34,21 @@ export function selectionFromOptionId(
   optionId: AiModelOptionId,
   modelOverride?: unknown
 ): AiSelection {
-  const option =
-    AI_MODEL_OPTIONS.find((o) => o.id === optionId) ?? AI_MODEL_OPTIONS[0];
   return {
-    provider: option.provider,
-    model: concreteModel(option.provider, modelOverride),
-    optionId: option.id,
+    provider: "claude",
+    model: concreteModel("claude", modelOverride),
+    optionId,
   };
 }
 
 function concreteModel(provider: AiProvider, override?: unknown): string {
   if (typeof override === "string" && override.trim()) {
-    return override.trim();
+    const model = override.trim();
+    // Ignore former Grok model overrides — analysis is Claude-only.
+    if (provider === "claude" && /grok/i.test(model)) {
+      return config.claudeModel;
+    }
+    return model;
   }
   return provider === "claude" ? config.claudeModel : config.xaiModel;
 }
@@ -68,10 +60,8 @@ export function getProviderAvailability(): Record<
 > {
   return {
     grok: {
-      available: Boolean(config.xaiApiKey),
-      message: config.xaiApiKey
-        ? undefined
-        : "Grok 4.5 is not configured on the server.",
+      available: false,
+      message: "Grok analysis is disabled. Use Claude.",
     },
     claude: {
       available: Boolean(config.claudeApiKey),

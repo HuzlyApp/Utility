@@ -39,7 +39,7 @@ export async function saveAnalysis(params: {
   if (!db) return null;
 
   const cm = params.validated.candidate_match;
-  const provider = params.provider ?? "grok";
+  const provider = params.provider ?? "claude";
   const analyzedAt = new Date().toISOString();
   const rows = (await db`
     INSERT INTO candidate_match_analyses (

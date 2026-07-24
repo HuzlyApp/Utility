@@ -19,7 +19,13 @@ export function useAiModelSelection() {
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (isAiModelOptionId(raw)) setOptionIdState(raw);
+      if (isAiModelOptionId(raw)) {
+        setOptionIdState(raw);
+      } else if (raw) {
+        // Migrate disabled options (e.g. former grok-4.5) to Claude.
+        window.localStorage.setItem(STORAGE_KEY, DEFAULT_AI_MODEL_OPTION);
+        setOptionIdState(DEFAULT_AI_MODEL_OPTION);
+      }
     } catch {
       /* ignore */
     }

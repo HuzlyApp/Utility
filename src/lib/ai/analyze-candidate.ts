@@ -36,9 +36,9 @@ export function getProviderAdapter(provider: AiProvider): ProviderAdapter {
   return adapters[provider];
 }
 
-function optionIdFor(provider: AiProvider, explicit?: AiModelOptionId): AiModelOptionId {
+function optionIdFor(_provider: AiProvider, explicit?: AiModelOptionId): AiModelOptionId {
   if (explicit) return explicit;
-  return provider === "claude" ? "claude" : DEFAULT_AI_MODEL_OPTION;
+  return DEFAULT_AI_MODEL_OPTION;
 }
 
 /**
@@ -50,6 +50,13 @@ export async function analyzeCandidate(
   args: AnalyzeCandidateArgs,
   meta?: Partial<Omit<AnalysisCallMeta, "provider" | "model" | "inputCharCount" | "resumeCharCount" | "jobCharCount">>
 ): Promise<AnalyzeCandidateResult> {
+  if (args.provider === "grok") {
+    throw new ProviderUnavailableError(
+      "Grok analysis is disabled. Use Claude.",
+      "grok"
+    );
+  }
+
   const adapter = getProviderAdapter(args.provider);
 
   if (!adapter.isConfigured()) {
@@ -208,7 +215,7 @@ export async function runAnalysis(
   const result = await analyzeCandidate(
     {
       ...args,
-      provider: args.provider ?? "grok",
+      provider: args.provider ?? "claude",
       model: args.model,
     },
     meta

@@ -27,7 +27,7 @@ export async function saveCandidateAnalysis(
   const sql = getSql();
   const { user, validated } = params;
   const cm = validated.candidate_match;
-  const provider = params.provider ?? "grok";
+  const provider = params.provider ?? "claude";
   const status = params.analysisStatus ?? "completed";
   const analyzedAt = new Date().toISOString();
 

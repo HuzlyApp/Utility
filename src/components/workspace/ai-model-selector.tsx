@@ -25,6 +25,38 @@ export function AiModelSelector({
   availability?: ProviderAvailability | null;
   className?: string;
 }) {
+  const selectedProvider =
+    AI_MODEL_OPTIONS.find((o) => o.id === value)?.provider ?? "claude";
+
+  // Single selectable provider — show a compact label instead of a toggle group.
+  if (AI_MODEL_OPTIONS.length === 1) {
+    const only = AI_MODEL_OPTIONS[0];
+    const unavailable = availability
+      ? !availability[only.provider]?.available
+      : false;
+    return (
+      <div className={cn("flex flex-col gap-1", className)}>
+        <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+          AI Model
+        </span>
+        <div
+          className={cn(
+            "inline-flex h-8 items-center rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-800",
+            (disabled || unavailable) && "opacity-50"
+          )}
+        >
+          {only.label}
+        </div>
+        {unavailable && (
+          <p className="text-xs text-red-600">
+            {availability?.[only.provider]?.message ??
+              `${only.label} is unavailable`}
+          </p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className={cn("flex flex-col gap-1", className)}>
       <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
@@ -65,9 +97,9 @@ export function AiModelSelector({
           );
         })}
       </div>
-      {availability && !availability[AI_MODEL_OPTIONS.find((o) => o.id === value)?.provider ?? "grok"]?.available && (
+      {availability && !availability[selectedProvider]?.available && (
         <p className="text-xs text-red-600">
-          {availability[AI_MODEL_OPTIONS.find((o) => o.id === value)?.provider ?? "grok"]?.message}
+          {availability[selectedProvider]?.message}
         </p>
       )}
     </div>
@@ -83,12 +115,14 @@ export function ModelBadge({
 }) {
   if (!provider && !model) return null;
 
-  let label = "Grok 4.5";
+  // Preserve historical Grok labels for past analyses; new work is Claude-only.
+  let label = "Claude";
   if (provider === "claude" || (model ?? "").toLowerCase().includes("claude")) {
     label = "Claude";
-  } else if (model && !model.includes("4.5") && model.toLowerCase().includes("grok")) {
-    label = model;
-  } else if (model && !model.toLowerCase().includes("grok") && provider !== "grok") {
+  } else if (provider === "grok" || (model ?? "").toLowerCase().includes("grok")) {
+    if (!model || model.includes("4.5") || model === "grok-4.5") label = "Grok 4.5";
+    else label = model;
+  } else if (model) {
     label = model;
   }
 
