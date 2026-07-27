@@ -4,9 +4,14 @@ import {
   buildRepairPrompt,
 } from "@/lib/prompt";
 import { parseAiResult } from "@/lib/schema";
-import { grokProvider } from "./providers/grok";
 import { claudeProvider } from "./providers/claude";
 import { logAnalysisOperation } from "./log";
+import {
+  PerformanceTimer,
+  logPerformanceMetrics,
+  categorizeValidationError,
+} from "./performance";
+import type { PerformanceReport } from "./performance";
 import {
   AiServiceError,
   AiValidationError,
@@ -28,7 +33,7 @@ import type {
 import { DEFAULT_AI_MODEL_OPTION } from "./types";
 
 const adapters: Record<AiProvider, ProviderAdapter> = {
-  grok: grokProvider,
+  grok: claudeProvider, // Grok disabled - route to Claude
   claude: claudeProvider,
 };
 
@@ -36,7 +41,10 @@ export function getProviderAdapter(provider: AiProvider): ProviderAdapter {
   return adapters[provider];
 }
 
-function optionIdFor(_provider: AiProvider, explicit?: AiModelOptionId): AiModelOptionId {
+function optionIdFor(
+  _provider: AiProvider,
+  explicit?: AiModelOptionId
+): AiModelOptionId {
   if (explicit) return explicit;
   return DEFAULT_AI_MODEL_OPTION;
 }
@@ -48,8 +56,13 @@ function optionIdFor(_provider: AiProvider, explicit?: AiModelOptionId): AiModel
  */
 export async function analyzeCandidate(
   args: AnalyzeCandidateArgs,
-  meta?: Partial<Omit<AnalysisCallMeta, "provider" | "model" | "inputCharCount" | "resumeCharCount" | "jobCharCount">>
-): Promise<AnalyzeCandidateResult> {
+  meta?: Partial<
+    Omit<
+      AnalysisCallMeta,
+      "provider" | "model" | "inputCharCount" | "resumeCharCount" | "jobCharCount"
+    >
+  >
+): Promise<AnalyzeCandidateResult & { perf?: PerformanceReport }> {
   if (args.provider === "grok") {
     throw new ProviderUnavailableError(
       "Grok analysis is disabled. Use Claude.",
@@ -82,12 +95,18 @@ export async function analyzeCandidate(
   };
 
   logAnalysisOperation("analysis_started", analysisMeta);
+  const timer = new PerformanceTimer();
+  timer.start("prompt_build");
 
   const userPrompt = buildUserPrompt(args);
   const baseMessages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: userPrompt },
   ];
+
+  timer.end("prompt_build");
+  timer.start("claude_time_to_first_token");
+  timer.start("claude_generation");
 
   try {
     const firstResponse = await adapter.complete(baseMessages, {
@@ -97,6 +116,15 @@ export async function analyzeCandidate(
     });
     const firstRaw = firstResponse.content;
 
+    // Use provider-reported TTFB if available
+    const ttfbMs =
+      (firstResponse as { _timing?: { timeToFirstByteMs: number } })._timing
+        ?.timeToFirstByteMs ?? 0;
+
+    timer.end("claude_time_to_first_token");
+    timer.end("claude_generation");
+    timer.start("json_parse");
+
     if (!firstRaw || firstRaw.trim().length === 0) {
       logAnalysisOperation("empty_response", analysisMeta, { attempt: 1 });
       throw new EmptyResponseError(
@@ -105,7 +133,11 @@ export async function analyzeCandidate(
     }
 
     const firstParsed = parseAiResult(firstRaw);
+    timer.end("json_parse");
+    timer.start("validation");
+
     if (firstParsed.ok) {
+      timer.end("validation");
       logAnalysisOperation("validation_passed", analysisMeta, {
         attempt: 1,
         repaired: false,
@@ -119,18 +151,37 @@ export async function analyzeCandidate(
         model,
         optionId,
         tokenUsage: firstResponse.tokenUsage,
+        perf: {
+          prompt_build_ms: Math.round(timer.duration("prompt_build")),
+          claude_time_to_first_token_ms: Math.round(ttfbMs),
+          claude_generation_ms: Math.round(timer.duration("claude_generation")),
+          json_parse_ms: Math.round(timer.duration("json_parse")),
+          validation_ms: Math.round(timer.duration("validation")),
+          repair_retry_ms: 0,
+          scoring_ms: 0,
+          persistence_ms: 0,
+          client_render_ms: 0,
+          total_duration_ms: Math.round(timer.total()),
+        },
       };
     }
 
+    timer.end("validation");
+    const repairErrorCategory = categorizeValidationError(firstParsed.error);
     logAnalysisOperation("validation_failed", analysisMeta, {
       attempt: 1,
+      errorCategory: repairErrorCategory,
       error: firstParsed.error,
     });
 
+    timer.start("repair_retry");
     const repairMessages: ChatMessage[] = [
       ...baseMessages,
       { role: "assistant", content: firstRaw },
-      { role: "user", content: buildRepairPrompt(firstRaw, firstParsed.error) },
+      {
+        role: "user",
+        content: buildRepairPrompt(firstRaw, firstParsed.error),
+      },
     ];
 
     const repairResponse = await adapter.complete(repairMessages, {
@@ -148,6 +199,8 @@ export async function analyzeCandidate(
     }
 
     const repairParsed = parseAiResult(repairRaw);
+    timer.end("repair_retry");
+
     if (repairParsed.ok) {
       logAnalysisOperation("validation_passed", analysisMeta, {
         attempt: 2,
@@ -162,12 +215,26 @@ export async function analyzeCandidate(
         model,
         optionId,
         tokenUsage: repairResponse.tokenUsage,
+        perf: {
+          prompt_build_ms: Math.round(timer.duration("prompt_build")),
+          claude_time_to_first_token_ms: Math.round(ttfbMs),
+          claude_generation_ms: Math.round(timer.duration("claude_generation")),
+          json_parse_ms: Math.round(timer.duration("json_parse")),
+          validation_ms: Math.round(timer.duration("validation")),
+          repair_retry_ms: Math.round(timer.duration("repair_retry")),
+          scoring_ms: 0,
+          persistence_ms: 0,
+          client_render_ms: 0,
+          total_duration_ms: Math.round(timer.total()),
+        },
       };
     }
 
     logAnalysisOperation("repair_failed", analysisMeta, {
       firstError: firstParsed.error,
       repairError: repairParsed.error,
+      firstErrorCategory: repairErrorCategory,
+      repairErrorCategory: categorizeValidationError(repairParsed.error),
     });
 
     throw new AiValidationError(
@@ -203,7 +270,12 @@ export async function runAnalysis(
     provider?: AiProvider;
     model?: string;
   },
-  meta?: Partial<Omit<AnalysisCallMeta, "provider" | "model" | "inputCharCount" | "resumeCharCount" | "jobCharCount">>
+  meta?: Partial<
+    Omit<
+      AnalysisCallMeta,
+      "provider" | "model" | "inputCharCount" | "resumeCharCount" | "jobCharCount"
+    >
+  >
 ): Promise<{
   aiResult: AnalyzeCandidateResult["aiResult"];
   rawResponse: string;
@@ -211,6 +283,7 @@ export async function runAnalysis(
   model: string;
   provider: AiProvider;
   tokenUsage?: AnalyzeCandidateResult["tokenUsage"];
+  perf?: PerformanceReport;
 }> {
   const result = await analyzeCandidate(
     {
@@ -227,5 +300,6 @@ export async function runAnalysis(
     model: result.model,
     provider: result.provider,
     tokenUsage: result.tokenUsage,
+    perf: result.perf,
   };
 }

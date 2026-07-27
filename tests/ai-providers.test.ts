@@ -14,24 +14,15 @@ vi.mock("@/lib/config", () => ({
     claudeApiKey: "test-claude-key",
     claudeModel: "claude-sonnet-4-5-20250929",
     claudeTimeoutMs: 180000,
-    claudeMaxTokens: 8192,
+    claudeMaxTokens: 4096,
     claudeTemperature: 0,
     recentExperienceMonths: 24,
+    jobCacheTtlMs: 3600000,
+    jobCacheMaxSize: 100,
   },
 }));
 
-const grokComplete = vi.fn();
 const claudeComplete = vi.fn();
-
-vi.mock("@/lib/ai/providers/grok", () => ({
-  grokProvider: {
-    provider: "grok",
-    isConfigured: () => false,
-    unavailableMessage: () => "Grok analysis is disabled. Use Claude.",
-    resolveModel: (m?: string) => m || "grok-4.5",
-    complete: (...args: unknown[]) => grokComplete(...args),
-  },
-}));
 
 vi.mock("@/lib/ai/providers/claude", () => ({
   claudeProvider: {
@@ -41,6 +32,54 @@ vi.mock("@/lib/ai/providers/claude", () => ({
     resolveModel: (m?: string) => m || "claude-sonnet-4-5-20250929",
     complete: (...args: unknown[]) => claudeComplete(...args),
   },
+}));
+
+vi.mock("@/lib/ai/performance", () => ({
+  PerformanceTimer: class {
+    start = vi.fn();
+    end = vi.fn(() => 10);
+    duration = vi.fn(() => 10);
+    total = vi.fn(() => 100);
+  },
+  AnalysisPerformanceTracker: class {
+    markPromptBuilt = vi.fn();
+    markClaudeRequestStarted = vi.fn();
+    markClaudeFirstToken = vi.fn();
+    markClaudeComplete = vi.fn();
+    markJsonParsed = vi.fn();
+    markValidated = vi.fn();
+    markRepairStarted = vi.fn();
+    markRepairComplete = vi.fn();
+    markScoringComplete = vi.fn();
+    markPersistenceComplete = vi.fn();
+    setValidationErrorCategory = vi.fn();
+    getMetrics = vi.fn(() => ({
+      provider: "claude",
+      model: "claude-sonnet-4-5-20250929",
+      totalDurationMs: 100,
+      stages: {},
+      jobChars: 100,
+      resumeChars: 100,
+      repairAttempted: false,
+      repairSucceeded: false,
+    }));
+    getReport = vi.fn(() => ({
+      prompt_build_ms: 10,
+      claude_time_to_first_token_ms: 500,
+      claude_generation_ms: 2000,
+      json_parse_ms: 5,
+      validation_ms: 10,
+      repair_retry_ms: 0,
+      scoring_ms: 0,
+      persistence_ms: 0,
+      client_render_ms: 0,
+      total_duration_ms: 2525,
+    }));
+  },
+  categorizeValidationError: vi.fn(() => "unknown_validation_error"),
+  categorizeRepairError: vi.fn(() => "unknown_validation_error"),
+  logPerformanceMetrics: vi.fn(),
+  logPerformanceReport: vi.fn(),
 }));
 
 import { analyzeCandidate } from "@/lib/ai/analyze-candidate";
@@ -56,24 +95,11 @@ const baseArgs = {
 
 describe("AI model selection routing", () => {
   beforeEach(() => {
-    grokComplete.mockReset();
     claudeComplete.mockReset();
   });
 
   afterEach(() => {
     vi.clearAllMocks();
-  });
-
-  it("rejects Grok because analysis with Grok is disabled", async () => {
-    await expect(
-      analyzeCandidate({
-        ...baseArgs,
-        provider: "grok",
-      })
-    ).rejects.toBeInstanceOf(ProviderUnavailableError);
-
-    expect(grokComplete).not.toHaveBeenCalled();
-    expect(claudeComplete).not.toHaveBeenCalled();
   });
 
   it("uses Claude when Claude is selected", async () => {
@@ -90,9 +116,10 @@ describe("AI model selection routing", () => {
     });
 
     expect(claudeComplete).toHaveBeenCalledTimes(1);
-    expect(grokComplete).not.toHaveBeenCalled();
     expect(result.provider).toBe("claude");
     expect(result.model).toBe("claude-sonnet-4-5-20250929");
+    expect(result.perf).toBeDefined();
+    expect(result.perf?.claude_generation_ms).toBe(10);
   });
 
   it("rejects invalid AI responses safely", async () => {
@@ -126,7 +153,7 @@ describe("AI model selection routing", () => {
 });
 
 describe("resolveAiSelection", () => {
-  it("defaults to Claude (Grok disabled)", () => {
+  it("defaults to Claude", () => {
     expect(resolveAiSelection({})).toEqual({
       provider: "claude",
       model: "claude-sonnet-4-5-20250929",
@@ -138,7 +165,7 @@ describe("resolveAiSelection", () => {
     });
   });
 
-  it("remaps former Grok option requests to Claude", () => {
+  it("ignores former grok option requests and resolves to Claude", () => {
     expect(
       resolveAiSelection({ ai_model_option: "grok-4.5", ai_provider: "grok" })
     ).toMatchObject({
@@ -199,11 +226,12 @@ describe("API key exposure safety", () => {
     expect(serialized).not.toContain("test-claude-key");
     expect(serialized).not.toMatch(/sk-/i);
     expect(availability.grok.available).toBe(false);
+    expect(availability.claude.available).toBe(true);
   });
 });
 
 describe("schema normalization", () => {
-  it("existing Grok-shaped payloads still validate", () => {
+  it("existing payloads still validate", () => {
     const parsed = parseAiResult(JSON.stringify(makeAiResult()));
     expect(parsed.ok).toBe(true);
   });

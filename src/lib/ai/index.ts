@@ -28,6 +28,7 @@ export type {
   ProviderAdapter,
   ProviderCallResult,
   ChatMessage,
+  AnalysisPerformanceMetrics,
 } from "./types";
 export {
   ConfigurationError,
@@ -38,6 +39,14 @@ export {
   AiValidationError,
   ProviderUnavailableError,
 } from "./errors";
+export {
+  PerformanceTimer,
+  AnalysisPerformanceTracker,
+  categorizeValidationError,
+  logPerformanceMetrics,
+  type AnalysisStageTimings,
+  type PerformanceMetrics,
+} from "./performance";
 
 /** @deprecated Use AnalyzeCandidateResult */
 export type AnalyzeAiResult = import("./types").AnalyzeCandidateResult;

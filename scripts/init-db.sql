@@ -78,6 +78,30 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON candidate_match_audit_logs(creat
 -- ALTER TABLE candidate_match_requirements ENABLE ROW LEVEL SECURITY;
 -- ALTER TABLE candidate_match_audit_logs ENABLE ROW LEVEL SECURITY;
 
+-- Job-requirement cache (avoids re-analyzing the same JD for every candidate).
+CREATE TABLE IF NOT EXISTS job_analysis_cache (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id TEXT DEFAULT 'default',
+  job_id TEXT,
+  source_hash TEXT NOT NULL,
+  normalized_mandatory_requirements JSONB,
+  normalized_preferred_requirements JSONB,
+  required_licenses TEXT[],
+  required_certifications TEXT[],
+  required_years_experience TEXT,
+  specialty_requirements TEXT[],
+  location_constraints TEXT,
+  education_requirements TEXT[],
+  requirement_weights JSONB,
+  analysis_version TEXT DEFAULT '1.0',
+  model_used TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_cache_hash ON job_analysis_cache(source_hash);
+CREATE INDEX IF NOT EXISTS idx_job_cache_tenant ON job_analysis_cache(tenant_id);
+
 -- Example RLS policies (uncomment if using RLS)
 -- CREATE POLICY tenant_isolation ON candidate_match_analyses
 --   USING (tenant_id = current_setting('app.current_tenant')::TEXT);

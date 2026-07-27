@@ -15,7 +15,7 @@ export interface ClientAiSelectionBody {
 
 /**
  * Resolve the provider/model selection from a request body.
- * Grok analysis is disabled — always resolves to Claude.
+ * Claude is the only active analysis provider.
  */
 export function resolveAiSelection(
   body?: ClientAiSelectionBody | null
@@ -25,8 +25,7 @@ export function resolveAiSelection(
     return selectionFromOptionId(optionRaw, body?.ai_model);
   }
 
-  // Explicit Grok requests are remapped to Claude (provider disabled).
-  // Unknown option ids / providers also fall through to Claude.
+  // Unknown option ids / providers fall through to Claude.
   return selectionFromOptionId(DEFAULT_AI_MODEL_OPTION, body?.ai_model);
 }
 
@@ -44,18 +43,14 @@ export function selectionFromOptionId(
 function concreteModel(provider: AiProvider, override?: unknown): string {
   if (typeof override === "string" && override.trim()) {
     const model = override.trim();
-    // Ignore former Grok model overrides — analysis is Claude-only.
-    if (provider === "claude" && /grok/i.test(model)) {
-      return config.claudeModel;
-    }
     return model;
   }
-  return provider === "claude" ? config.claudeModel : config.xaiModel;
+  return config.claudeModel;
 }
 
 /** Public, non-secret availability flags for the UI. */
 export function getProviderAvailability(): Record<
-  AiProvider,
+  string,
   { available: boolean; message?: string }
 > {
   return {

@@ -2,6 +2,8 @@ import { analyzeCandidate } from "./ai";
 import { validateAndScore } from "./scoring";
 import { sanitizeResumeText } from "./sanitize";
 import { config } from "./config";
+import { PerformanceTimer } from "./ai/performance";
+import { getJobRequirementsCache } from "./ai/job-cache";
 import type { AiResult } from "./schema";
 import type { AnalyzeRequestBody } from "./types";
 import type { AiModelOptionId, AiProvider } from "./ai";
@@ -26,6 +28,8 @@ export interface PerformAnalysisResult {
   model: string;
   optionId: AiModelOptionId;
   piiRemoved: string[];
+  perf?: import("./ai/types").AnalysisPerformanceMetrics;
+  jobCacheHit?: boolean;
 }
 
 /**
@@ -40,6 +44,14 @@ export async function performAnalysis(
   // Grok analysis is disabled — match analysis always uses Claude.
   const provider: AiProvider = "claude";
   const optionId = meta?.optionId ?? DEFAULT_AI_MODEL_OPTION;
+
+  // Fetch or build cached job requirements to reduce prompt size for repeat jobs.
+  const { cached: jobCache, hit: jobCacheHit } = await getJobRequirementsCache({
+    jobText: input.job_description_text,
+    structured: input.structured_job_fields,
+    tenantId: meta?.tenantId,
+    modelUsed: meta?.model ?? config.claudeModel,
+  });
 
   const ai = await analyzeCandidate(
     {
@@ -56,6 +68,7 @@ export async function performAnalysis(
       verified_recruiter_inputs: input.verified_recruiter_inputs,
       recruiter_notes: input.recruiter_notes,
       recent_experience_months: config.recentExperienceMonths,
+      cached_job_requirements: jobCache,
     },
     {
       analysisId: meta?.analysisId,
@@ -64,7 +77,32 @@ export async function performAnalysis(
     }
   );
 
+  const timer = new PerformanceTimer();
+  timer.start("scoring");
   const { result: validatedResult, adjustments } = validateAndScore(ai.aiResult);
+  timer.end("scoring");
+
+  // Merge AI provider timings with application-side timings.
+  const basePerf = ai.perf;
+  const perf: import("./ai/types").AnalysisPerformanceMetrics = basePerf
+    ? {
+        ...basePerf,
+        scoring_ms: timer.duration("scoring"),
+        total_duration_ms:
+          basePerf.total_duration_ms + timer.duration("scoring"),
+      }
+    : {
+        prompt_build_ms: 0,
+        claude_time_to_first_token_ms: 0,
+        claude_generation_ms: 0,
+        json_parse_ms: 0,
+        validation_ms: 0,
+        repair_retry_ms: 0,
+        scoring_ms: timer.duration("scoring"),
+        persistence_ms: 0,
+        client_render_ms: 0,
+        total_duration_ms: timer.duration("scoring"),
+      };
 
   return {
     aiResult: ai.aiResult,
@@ -76,5 +114,7 @@ export async function performAnalysis(
     model: ai.model,
     optionId: ai.optionId,
     piiRemoved: removed,
+    perf,
+    jobCacheHit,
   };
 }

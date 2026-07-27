@@ -1,28 +1,29 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Card, CardBody } from "@/components/ui/primitives";
 import { CheckIcon, SparklesIcon } from "@/components/ui/icons";
 import { cn } from "@/lib/cn";
+import type { AnalysisProgressEvent } from "@/lib/analysis-stages";
+
+interface AnalysisLoadingStateProps {
+  progress?: AnalysisProgressEvent | null;
+}
 
 const STAGES = [
-  "Reading job requirements",
-  "Extracting mandatory qualifications",
-  "Reviewing candidate experience",
-  "Comparing licenses and certifications",
-  "Checking potential gaps",
-  "Preparing recruiter recommendations",
+  { key: "queued", label: "Queued…" },
+  { key: "extracting", label: "Extracting résumé content…" },
+  { key: "preparing", label: "Preparing candidate data…" },
+  { key: "analyzing", label: "Analyzing with AI…" },
+  { key: "validating", label: "Validating result…" },
+  { key: "saving", label: "Saving analysis…" },
 ];
 
-export function AnalysisLoadingState() {
-  const [active, setActive] = useState(0);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setActive((i) => Math.min(i + 1, STAGES.length - 1));
-    }, 2200);
-    return () => clearInterval(timer);
-  }, []);
+export function AnalysisLoadingState({ progress }: AnalysisLoadingStateProps) {
+  // If no real progress is provided, show a static analyzing state.
+  const activeStage = progress?.stage ?? "analyzing";
+  const activeIndex = STAGES.findIndex((s) => s.key === activeStage);
+  const currentIndex = activeIndex >= 0 ? activeIndex : STAGES.length - 1;
 
   return (
     <Card className="mx-auto max-w-lg animate-fade-in">
@@ -35,16 +36,16 @@ export function AnalysisLoadingState() {
             Analyzing Candidate Match
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Claude is comparing the résumé against the job requirements.
+            {progress?.message ?? "Claude is comparing the résumé against the job requirements."}
           </p>
         </div>
 
         <ol className="space-y-3">
           {STAGES.map((stage, i) => {
-            const done = i < active;
-            const current = i === active;
+            const done = i < currentIndex;
+            const current = i === currentIndex;
             return (
-              <li key={stage} className="flex items-center gap-3">
+              <li key={stage.key} className="flex items-center gap-3">
                 <span
                   className={cn(
                     "flex h-6 w-6 flex-none items-center justify-center rounded-full text-xs transition-colors",
@@ -69,7 +70,7 @@ export function AnalysisLoadingState() {
                     !done && !current && "text-slate-400"
                   )}
                 >
-                  {stage}
+                  {stage.label}
                 </span>
               </li>
             );

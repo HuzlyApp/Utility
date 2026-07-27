@@ -1,14 +1,15 @@
 import type { AiResult } from "@/lib/schema";
 import type { UserPromptArgs } from "@/lib/prompt";
+import type { NormalizedJobRequirements } from "@/lib/job-cache";
+export type { NormalizedJobRequirements } from "@/lib/job-cache";
 
 /** Supported AI providers for candidate-to-job matching. */
-export const AI_PROVIDERS = ["grok", "claude"] as const;
+export const AI_PROVIDERS = ["claude", "grok"] as const;
 export type AiProvider = (typeof AI_PROVIDERS)[number];
 
 /**
  * UI-facing model choices for analysis.
- * Grok is disabled — Claude is the only selectable analysis provider.
- * The "grok" provider type remains for historical analysis records.
+ * Claude is the only selectable analysis provider.
  */
 export const AI_MODEL_OPTIONS = [
   {
@@ -35,10 +36,23 @@ export type AnalysisStatus = (typeof ANALYSIS_STATUSES)[number];
 
 export interface AiSelection {
   provider: AiProvider;
-  /** Concrete API model id (e.g. grok-4.5, claude-sonnet-4-…). */
+  /** Concrete API model id (e.g. claude-sonnet-4-…). */
   model: string;
   /** Stable UI option id. */
   optionId: AiModelOptionId;
+}
+
+export interface AnalysisPerformanceMetrics {
+  prompt_build_ms: number;
+  claude_time_to_first_token_ms: number;
+  claude_generation_ms: number;
+  json_parse_ms: number;
+  validation_ms: number;
+  repair_retry_ms: number;
+  scoring_ms: number;
+  persistence_ms: number;
+  client_render_ms: number;
+  total_duration_ms: number;
 }
 
 export interface ProviderCallResult {
@@ -49,6 +63,11 @@ export interface ProviderCallResult {
     completionTokens?: number;
     totalTokens?: number;
   };
+  /** Granular performance timings when available. */
+  perf?: AnalysisPerformanceMetrics;
+  /** Provider-internal timing metadata (not part of public contract). */
+  _timeToFirstByteMs?: number;
+  _generationMs?: number;
 }
 
 export interface ProviderAdapter {
@@ -83,6 +102,8 @@ export interface AnalyzeCandidateArgs extends UserPromptArgs {
   /** Optional concrete model override; otherwise provider default from config. */
   model?: string;
   optionId?: AiModelOptionId;
+  /** Cached normalized job requirements to reduce prompt size. */
+  cached_job_requirements?: import("@/lib/ai/job-cache").CachedJobRequirements;
 }
 
 export interface AnalyzeCandidateResult {
@@ -93,6 +114,7 @@ export interface AnalyzeCandidateResult {
   model: string;
   optionId: AiModelOptionId;
   tokenUsage?: ProviderCallResult["tokenUsage"];
+  perf?: AnalysisPerformanceMetrics;
 }
 
 export function isAiProvider(value: unknown): value is AiProvider {
@@ -114,13 +136,8 @@ export function displayLabelForSelection(
   model: string | null | undefined
 ): string {
   if (provider === "claude") return "Claude";
-  if (provider === "grok") {
-    if (!model || model.includes("4.5") || model === "grok-4.5") return "Grok 4.5";
-    return model;
-  }
   if (model) {
     if (model.toLowerCase().includes("claude")) return "Claude";
-    if (model.includes("grok") || model.includes("4.5")) return model.includes("4.5") ? "Grok 4.5" : model;
     return model;
   }
   return "Claude";

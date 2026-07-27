@@ -72,6 +72,7 @@ export async function POST(req: NextRequest) {
     });
 
     let analysisId: string | null = null;
+    const persistStart = Date.now();
     try {
       analysisId = await saveAnalysis({
         input,
@@ -84,6 +85,12 @@ export async function POST(req: NextRequest) {
     } catch (dbErr) {
       // Persistence is best-effort; never block the recruiter on a DB error.
       logServerError("analyze:persist", dbErr);
+    }
+    const persistMs = Date.now() - persistStart;
+
+    if (analysis.perf) {
+      analysis.perf.persistence_ms = persistMs;
+      analysis.perf.total_duration_ms = Date.now() - startedAt;
     }
 
     // Operational metadata only — no résumé/job content or secrets (spec §28).
@@ -98,6 +105,17 @@ export async function POST(req: NextRequest) {
       repaired: analysis.repaired,
       match_category: analysis.validatedResult.candidate_match.match_category,
       validation_status: "valid",
+      stages: analysis.perf
+        ? {
+            prompt_build_ms: analysis.perf.prompt_build_ms,
+            claude_generation_ms: analysis.perf.claude_generation_ms,
+            json_parse_ms: analysis.perf.json_parse_ms,
+            validation_ms: analysis.perf.validation_ms,
+            repair_retry_ms: analysis.perf.repair_retry_ms,
+            scoring_ms: analysis.perf.scoring_ms,
+            persistence_ms: analysis.perf.persistence_ms,
+          }
+        : undefined,
     });
 
     return ok({
@@ -116,7 +134,6 @@ export async function POST(req: NextRequest) {
     if (err instanceof ProviderUnavailableError) {
       return fail(err.message, 503, "PROVIDER_UNAVAILABLE");
     }
-    // Handle specific error types with appropriate user-facing messages
     if (err instanceof ConfigurationError) {
       logServerError("analyze:config", err.message);
       return fail(
@@ -125,7 +142,7 @@ export async function POST(req: NextRequest) {
         "CONFIGURATION_ERROR"
       );
     }
-    
+
     if (err instanceof RateLimitError) {
       logServerError("analyze:rate_limit", err.message);
       return fail(
@@ -134,7 +151,7 @@ export async function POST(req: NextRequest) {
         "RATE_LIMITED"
       );
     }
-    
+
     if (err instanceof TimeoutError) {
       logServerError("analyze:timeout", err.message);
       return fail(
@@ -143,7 +160,7 @@ export async function POST(req: NextRequest) {
         "TIMEOUT"
       );
     }
-    
+
     if (err instanceof EmptyResponseError) {
       logServerError("analyze:empty_response", err.message);
       return fail(
@@ -152,7 +169,7 @@ export async function POST(req: NextRequest) {
         "EMPTY_RESPONSE"
       );
     }
-    
+
     if (err instanceof AiValidationError) {
       logServerError("analyze:validation", err.details);
       return fail(
@@ -161,7 +178,7 @@ export async function POST(req: NextRequest) {
         "INVALID_AI_RESPONSE"
       );
     }
-    
+
     if (err instanceof AiServiceError) {
       logServerError("analyze:service_error", err.originalError);
       return fail(
@@ -170,7 +187,7 @@ export async function POST(req: NextRequest) {
         "AI_SERVICE_ERROR"
       );
     }
-    
+
     logServerError("analyze", err);
     return fail(
       "The analysis could not be completed. Please try again.",

@@ -6,6 +6,7 @@ import {
   AiServiceError,
 } from "../errors";
 import { logAnalysisOperation } from "../log";
+import { PerformanceTimer } from "../performance";
 import type {
   AnalysisCallMeta,
   ChatMessage,
@@ -45,6 +46,14 @@ function splitMessages(messages: ChatMessage[]): {
   };
 }
 
+export interface ClaudeCallOptions {
+  model: string;
+  attemptNumber: number;
+  meta: AnalysisCallMeta;
+  timer?: PerformanceTimer;
+  onFirstToken?: () => void;
+}
+
 export const claudeProvider: ProviderAdapter = {
   provider: "claude",
 
@@ -60,13 +69,17 @@ export const claudeProvider: ProviderAdapter = {
     return requested?.trim() || config.claudeModel;
   },
 
-  async complete(messages, opts): Promise<ProviderCallResult> {
+  async complete(
+    messages,
+    opts: ClaudeCallOptions
+  ): Promise<ProviderCallResult> {
     if (!config.claudeApiKey) {
       throw new ConfigurationError(
         "CLAUDE_API_KEY is not configured on the server."
       );
     }
 
+    const timer = opts.timer ?? new PerformanceTimer();
     const startTime = Date.now();
     const meta: AnalysisCallMeta = {
       ...opts.meta,
@@ -81,30 +94,53 @@ export const claudeProvider: ProviderAdapter = {
       config.claudeTimeoutMs
     );
 
+    const body: Record<string, unknown> = {
+      model: opts.model,
+      max_tokens: config.claudeMaxTokens,
+      temperature: config.claudeTemperature,
+      system,
+      messages: anthropicMessages,
+    };
+
+    // Enable structured-output beta when available (improves JSON reliability).
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      "x-api-key": config.claudeApiKey,
+      "anthropic-version": ANTHROPIC_VERSION,
+    };
+    if (config.claudeStructuredOutput) {
+      headers["anthropic-beta"] = "structured-output-2024-09-10";
+    }
+
+    // Thinking budget for Claude 3.7+ (disabled by default for speed).
+    const thinkingBudget = config.claudeThinkingBudget;
+    if (thinkingBudget > 0) {
+      body.thinking = { type: "enabled", budget_tokens: thinkingBudget };
+      // Thinking requires temperature 1 on some versions;
+      // keep temperature 0 for determinism unless thinking is on.
+      body.temperature = 1;
+    }
+
     try {
+      const fetchStart = Date.now();
       const res = await fetch(ANTHROPIC_URL, {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": config.claudeApiKey,
-          "anthropic-version": ANTHROPIC_VERSION,
-        },
-        body: JSON.stringify({
-          model: opts.model,
-          max_tokens: config.claudeMaxTokens,
-          temperature: config.claudeTemperature,
-          system,
-          messages: anthropicMessages,
-        }),
+        headers,
+        body: JSON.stringify(body),
         signal: controller.signal,
       });
 
-      const durationMs = Date.now() - startTime;
+      const timeToFirstByte = Date.now() - fetchStart;
+      timer.start("claude_time_to_first_token");
+      timer.end("claude_time_to_first_token");
+      // Override with the actual measured value since timer uses performance.now() internally
+      const ttfbOverride = timeToFirstByte;
+      opts.onFirstToken?.();
 
       if (res.status === 429) {
         logAnalysisOperation("rate_limit_error", meta, {
           attempt: opts.attemptNumber,
-          durationMs,
+          durationMs: timeToFirstByte,
         });
         throw new RateLimitError(
           "Claude rate limit exceeded. Please try again later."
@@ -114,45 +150,57 @@ export const claudeProvider: ProviderAdapter = {
       if (res.status === 408 || res.status === 504) {
         logAnalysisOperation("timeout_error", meta, {
           attempt: opts.attemptNumber,
-          durationMs,
+          durationMs: timeToFirstByte,
         });
         throw new TimeoutError(
           "The Claude analysis request timed out. Please try again."
         );
       }
 
-      const body = (await res.json().catch(() => null)) as {
-        content?: Array<{ type: string; text?: string }>;
+      const bodyJson = (await res.json().catch(() => null)) as {
+        content?: Array<
+          | { type: string; text?: string; thinking?: string }
+          | { type: "thinking"; thinking: string }
+        >;
         usage?: { input_tokens?: number; output_tokens?: number };
         error?: { message?: string; type?: string };
       } | null;
 
+      const generationMs = Date.now() - fetchStart;
+      timer.start("claude_generation");
+      timer.end("claude_generation");
+
       if (!res.ok) {
         const msg =
-          body?.error?.message ??
-          `Claude API error (${res.status}).`;
+          bodyJson?.error?.message ?? `Claude API error (${res.status}).`;
         logAnalysisOperation("request_failed", meta, {
           attempt: opts.attemptNumber,
-          durationMs,
+          durationMs: generationMs,
           status: res.status,
-          error: body?.error?.type ?? "http_error",
+          error: bodyJson?.error?.type ?? "http_error",
         });
         if (res.status === 401 || res.status === 403) {
           throw new ConfigurationError(
             "Claude API credentials were rejected. Check CLAUDE_API_KEY."
           );
         }
-        throw new AiServiceError(msg, body?.error);
+        throw new AiServiceError(msg, bodyJson?.error);
       }
 
-      const content =
-        body?.content
-          ?.filter((b) => b.type === "text" && b.text)
-          .map((b) => b.text!)
-          .join("\n") ?? "";
+      const contentBlocks = bodyJson?.content ?? [];
+      const textBlocks = contentBlocks.filter(
+        (b): b is { type: string; text?: string } =>
+          "type" in b && (b.type === "text" || b.type === "thinking")
+      );
 
-      const promptTokens = body?.usage?.input_tokens;
-      const completionTokens = body?.usage?.output_tokens;
+      // Only surface text responses; discard hidden thinking blocks.
+      const content = textBlocks
+        .filter((b) => b.type === "text" && b.text)
+        .map((b) => b.text!)
+        .join("\n");
+
+      const promptTokens = bodyJson?.usage?.input_tokens;
+      const completionTokens = bodyJson?.usage?.output_tokens;
       const totalTokens =
         promptTokens != null && completionTokens != null
           ? promptTokens + completionTokens
@@ -160,17 +208,21 @@ export const claudeProvider: ProviderAdapter = {
 
       logAnalysisOperation("request_completed", meta, {
         attempt: opts.attemptNumber,
-        durationMs,
+        durationMs: generationMs,
         promptTokens,
         completionTokens,
         totalTokens,
         responseLength: content.length,
+        timeToFirstByteMs: ttfbOverride,
       });
 
       return {
         content,
         model: opts.model,
         tokenUsage: { promptTokens, completionTokens, totalTokens },
+        // Expose measured TTFB so callers can report it even when they supplied a timer
+        _timeToFirstByteMs: ttfbOverride,
+        _generationMs: generationMs,
       };
     } catch (error) {
       if (

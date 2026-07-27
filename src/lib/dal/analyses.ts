@@ -60,10 +60,12 @@ export async function saveCandidateAnalysis(
 
   const analysisId = rows[0].id;
 
+  // Insert requirements (batch when possible).
   const allReqs = [
     ...validated.mandatory_requirements,
     ...validated.preferred_requirements,
   ];
+
   for (const r of allReqs) {
     await sql`
       INSERT INTO candidate_match_requirements (

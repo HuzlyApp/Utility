@@ -36,6 +36,9 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
+// In-process duplicate-request guard for workspace analyses.
+const inFlight = new Set<string>();
+
 function modelLabel(optionId: string): string {
   return AI_MODEL_OPTIONS.find((o) => o.id === optionId)?.label ?? "AI";
 }
@@ -118,6 +121,15 @@ export async function POST(
     const jmc = await getJobCandidate(user, params.workspaceId, params.candidateId);
     if (!jmc) return fail("Candidate is not attached to this workspace.", 404, "NOT_ATTACHED");
 
+    // Database-level guard: if already analyzing, reject duplicate.
+    if (jmc.status === "ANALYZING") {
+      return fail(
+        "An analysis is already in progress for this candidate.",
+        409,
+        "ALREADY_ANALYZING"
+      );
+    }
+
     let body: Record<string, unknown> = {};
     try {
       const text = await req.text();
@@ -129,6 +141,20 @@ export async function POST(
     const selection = resolveAiSelection(body);
     const label = modelLabel(selection.optionId);
     const encoder = new TextEncoder();
+
+    // Idempotency key from client + server-side composite key.
+    const idempotencyKey =
+      (body.idempotency_key as string | undefined) ??
+      `${params.workspaceId}:${params.candidateId}:${Date.now()}`;
+
+    if (inFlight.has(idempotencyKey)) {
+      return fail(
+        "An analysis for this request is already in progress.",
+        409,
+        "DUPLICATE_REQUEST"
+      );
+    }
+    inFlight.add(idempotencyKey);
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -293,6 +319,9 @@ export async function POST(
             stage: "completed",
             provider: analysis.provider,
             model: analysis.model,
+            duration_ms: analysis.perf?.total_duration_ms,
+            claude_generation_ms: analysis.perf?.claude_generation_ms,
+            repair_attempted: analysis.repaired,
           });
 
           send(
@@ -312,6 +341,7 @@ export async function POST(
           const mapped = mapAnalyzeError(err);
           await failStream(mapped.message, mapped.code);
         } finally {
+          inFlight.delete(idempotencyKey);
           controller.close();
         }
       },
