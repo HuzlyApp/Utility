@@ -14,11 +14,14 @@ import {
   type AnalysisProgressStage,
 } from "@/lib/analysis-stages";
 import {
-  analyzeCandidateStream,
+  analyzeCandidateWithDuplicateCheck,
+  DuplicateConfirmationNeededError,
   AnalyzeRequestError,
-} from "@/lib/client/analyze-candidate";
+} from "@/lib/client/analyze-with-duplicate-check";
+import type { DuplicateConfirmationRequired } from "@/lib/duplicate-candidate/messages";
 import { onWorkspaceCandidatesChanged } from "@/lib/workspace-events";
 import { CompareDialog } from "./compare-dialog";
+import { DuplicateWarningDialog } from "./duplicate-warning-dialog";
 import {
   AiModelSelector,
   ModelBadge,
@@ -106,6 +109,10 @@ export function RankingTable({
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [batchRunning, setBatchRunning] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [duplicateDialog, setDuplicateDialog] = useState<
+    (DuplicateConfirmationRequired & { candidateId: string }) | null
+  >(null);
+  const duplicateResolverRef = useRef<((continued: boolean) => void) | null>(null);
   const [progressById, setProgressById] = useState<Record<string, CandidateProgress>>({});
   const inFlightRef = useRef<Set<string>>(new Set());
   const [, setInFlightTick] = useState(0);
@@ -268,7 +275,13 @@ export function RankingTable({
     setInFlightTick((n) => n + 1);
   }
 
-  async function analyzeOne(candidateId: string): Promise<boolean> {
+  async function analyzeOne(
+    candidateId: string,
+    duplicateConfirmation?: { token: string }
+  ): Promise<boolean> {
+    const priorStatus =
+      rows.find((r) => r.candidate_id === candidateId)?.status ?? "READY";
+
     markInFlight(candidateId, true);
     setCandidateProgress(candidateId, {
       stage: "preparing",
@@ -281,10 +294,17 @@ export function RankingTable({
     );
 
     try {
-      const result = await analyzeCandidateStream({
+      const row = rows.find((r) => r.candidate_id === candidateId);
+      const result = await analyzeCandidateWithDuplicateCheck({
         workspaceId,
         candidateId,
-        body: requestBody,
+        body: {
+          ...requestBody,
+          ...(row?.status === "FAILED" || row?.status === "ANALYZING"
+            ? { force_retry: true }
+            : {}),
+        },
+        duplicateConfirmation,
         onProgress: (event) => {
           setCandidateProgress(candidateId, event);
           if (event.stage === "completed") {
@@ -310,6 +330,47 @@ export function RankingTable({
       );
       return true;
     } catch (err) {
+      if (
+        err instanceof DuplicateConfirmationNeededError &&
+        !duplicateConfirmation
+      ) {
+        setRows((prev) =>
+          prev.map((r) =>
+            r.candidate_id === candidateId ? { ...r, status: priorStatus } : r
+          )
+        );
+        setCandidateProgress(candidateId, {
+          stage: "preparing",
+          progress: 0,
+          message: "Waiting for duplicate confirmation…",
+          candidate_id: candidateId,
+        });
+
+        const continued = await new Promise<boolean>((resolve) => {
+          duplicateResolverRef.current = resolve;
+          setDuplicateDialog({
+            ...err.duplicate,
+            candidateId,
+          });
+        });
+
+        duplicateResolverRef.current = null;
+        setDuplicateDialog(null);
+
+        if (!continued) {
+          setProgressById((prev) => {
+            const next = { ...prev };
+            delete next[candidateId];
+            return next;
+          });
+          return false;
+        }
+
+        return analyzeOne(candidateId, {
+          token: err.duplicate.duplicate_confirmation_token,
+        });
+      }
+
       const message =
         err instanceof AnalyzeRequestError
           ? err.message
@@ -329,6 +390,22 @@ export function RankingTable({
     } finally {
       markInFlight(candidateId, false);
     }
+  }
+
+  function handleDuplicateContinue() {
+    duplicateResolverRef.current?.(true);
+  }
+
+  function handleDuplicateCancel() {
+    if (duplicateDialog) {
+      markInFlight(duplicateDialog.candidateId, false);
+      setProgressById((prev) => {
+        const next = { ...prev };
+        delete next[duplicateDialog.candidateId];
+        return next;
+      });
+    }
+    duplicateResolverRef.current?.(false);
   }
 
   async function analyzeSingle(candidateId: string) {
@@ -702,6 +779,17 @@ export function RankingTable({
 
       {compareOpen && (
         <CompareDialog entries={selectedEntries} onClose={() => setCompareOpen(false)} />
+      )}
+
+      {duplicateDialog && (
+        <DuplicateWarningDialog
+          candidateName={duplicateDialog.candidate_name}
+          confidence={duplicateDialog.duplicate_confidence}
+          matches={duplicateDialog.matches}
+          workspaceId={workspaceId}
+          onContinue={handleDuplicateContinue}
+          onCancel={handleDuplicateCancel}
+        />
       )}
     </div>
   );

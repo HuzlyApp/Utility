@@ -5,6 +5,7 @@ import type { AppUser } from "@/lib/auth/session";
 import type { AiResult } from "@/lib/schema";
 import type { AnalyzeRequestBody } from "@/lib/types";
 import type { AiProvider } from "@/lib/ai";
+import { normalizeCandidateName } from "@/lib/duplicate-candidate/normalize";
 
 export interface SaveAnalysisParams {
   user: AppUser;
@@ -19,6 +20,10 @@ export interface SaveAnalysisParams {
   provider?: AiProvider;
   analysisStatus?: "completed" | "failed";
   analysisError?: string | null;
+  duplicateWarningAcknowledged?: boolean;
+  duplicateConfidence?: "HIGH" | "POSSIBLE" | null;
+  candidateName?: string | null;
+  matchedAnalysisIds?: string[];
 }
 
 export async function saveCandidateAnalysis(
@@ -30,6 +35,13 @@ export async function saveCandidateAnalysis(
   const provider = params.provider ?? "claude";
   const status = params.analysisStatus ?? "completed";
   const analyzedAt = new Date().toISOString();
+  const candidateName =
+    params.candidateName ??
+    params.input.verified_recruiter_inputs?.candidate_name ??
+    null;
+  const normalizedCandidateName = candidateName
+    ? normalizeCandidateName(candidateName) || null
+    : null;
 
   const rows = (await sql`
     INSERT INTO candidate_match_analyses (
@@ -41,7 +53,9 @@ export async function saveCandidateAnalysis(
       ai_raw_response_json, validated_result_json, score_adjustments_json,
       overall_match_score, match_category, recommended_action,
       submission_readiness, confidence_score, analysis_version, model_name,
-      ai_provider, ai_model, analysis_status, analysis_error, analyzed_at
+      ai_provider, ai_model, analysis_status, analysis_error, analyzed_at,
+      candidate_name, normalized_candidate_name,
+      duplicate_warning_acknowledged, duplicate_confidence
     ) VALUES (
       ${user.tenantId}, ${user.id}, ${user.id}, ${user.id},
       ${params.workspaceId}, ${params.candidateId}, ${params.jobMatchCandidateId},
@@ -54,7 +68,9 @@ export async function saveCandidateAnalysis(
       ${cm.recommended_overall_match_score}, ${cm.match_category}, ${cm.recommended_action},
       ${validated.submission_readiness.readiness_status}, ${cm.confidence_score},
       ${validated.analysis_version}, ${params.model},
-      ${provider}, ${params.model}, ${status}, ${params.analysisError ?? null}, ${analyzedAt}
+      ${provider}, ${params.model}, ${status}, ${params.analysisError ?? null}, ${analyzedAt},
+      ${candidateName}, ${normalizedCandidateName},
+      ${params.duplicateWarningAcknowledged ?? false}, ${params.duplicateConfidence ?? null}
     ) RETURNING id
   `) as { id: string }[];
 
@@ -95,6 +111,21 @@ export async function saveCandidateAnalysis(
       ai_model: params.model,
     },
   });
+
+  if (params.duplicateWarningAcknowledged) {
+    await audit({
+      actorUserId: user.id,
+      tenantId: user.tenantId,
+      entityType: "analysis",
+      entityId: analysisId,
+      action: "DUPLICATE_WARNING_OVERRIDDEN",
+      newValue: {
+        candidate_name: candidateName,
+        matched_analysis_ids: params.matchedAnalysisIds ?? [],
+        duplicate_confidence: params.duplicateConfidence ?? null,
+      },
+    });
+  }
 
   return analysisId;
 }

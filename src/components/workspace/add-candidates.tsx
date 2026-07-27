@@ -1,11 +1,15 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardBody, Badge, Button, TextInput, TextArea } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
 import { ALLOWED_EXTS, IMAGE_EXTS, ACCEPT_ATTR, extOf } from "@/components/jobs/upload-constants";
-import { notifyWorkspaceCandidatesChanged } from "@/lib/workspace-events";
+import { notifyWorkspaceCandidatesChanged, onWorkspaceCandidatesChanged } from "@/lib/workspace-events";
+import { normalizeCandidateName, isCheckableCandidateName } from "@/lib/duplicate-candidate/normalize";
+import { isDuplicateConfirmationRequired } from "@/lib/duplicate-candidate/messages";
+import type { DuplicateConfirmationRequired } from "@/lib/duplicate-candidate/messages";
+import { DuplicateWarningDialog } from "./duplicate-warning-dialog";
 
 type SubStatus =
   | "QUEUED"
@@ -56,6 +60,38 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
   const [pasteName, setPasteName] = useState("");
   const [pasteText, setPasteText] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [workspaceNames, setWorkspaceNames] = useState<Set<string>>(new Set());
+  const [duplicateDialog, setDuplicateDialog] = useState<
+    (DuplicateConfirmationRequired & { subId: string }) | null
+  >(null);
+  const duplicateResolverRef = useRef<
+    ((result: { continued: boolean; token?: string }) => void) | null
+  >(null);
+
+  async function refreshWorkspaceNames() {
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/candidates`);
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.candidates)) {
+        const normalized = new Set<string>();
+        for (const row of data.candidates as Array<{ full_name: string | null }>) {
+          if (isCheckableCandidateName(row.full_name)) {
+            normalized.add(normalizeCandidateName(row.full_name!));
+          }
+        }
+        setWorkspaceNames(normalized);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  useEffect(() => {
+    void refreshWorkspaceNames();
+    return onWorkspaceCandidatesChanged(workspaceId, () => {
+      void refreshWorkspaceNames();
+    });
+  }, [workspaceId]);
 
   function addFiles(fileList: FileList | File[]) {
     const incoming = Array.from(fileList);
@@ -136,7 +172,10 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
     setPasteOpen(false);
   }
 
-  async function uploadOne(sub: Submission): Promise<SubStatus> {
+  async function uploadOne(
+    sub: Submission,
+    duplicateConfirmation?: { token: string }
+  ): Promise<SubStatus> {
     const hasImages = sub.files.some((f) => IMAGE_EXTS.includes(extOf(f.name)));
     setSubs((prev) =>
       prev.map((s) =>
@@ -154,8 +193,11 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
       fd.append("name", sub.name);
       if (sub.pastedText) fd.append("pasted_text", sub.pastedText);
       for (const f of sub.files) fd.append("files", f, f.name);
+      if (duplicateConfirmation) {
+        fd.append("continue_after_duplicate_warning", "true");
+        fd.append("duplicate_confirmation_token", duplicateConfirmation.token);
+      }
 
-      // Move to extracting while the server creates the DB record + processes files.
       setSubs((prev) =>
         prev.map((s) =>
           s.id === sub.id
@@ -169,6 +211,30 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
         body: fd,
       });
       const data = await res.json();
+
+      if (isDuplicateConfirmationRequired(data) && !duplicateConfirmation) {
+        setSubs((prev) =>
+          prev.map((s) =>
+            s.id === sub.id
+              ? { ...s, status: "QUEUED", message: "Duplicate name — confirmation required" }
+              : s
+          )
+        );
+
+        const decision = await new Promise<{ continued: boolean; token?: string }>((resolve) => {
+          duplicateResolverRef.current = resolve;
+          setDuplicateDialog({ ...data, subId: sub.id });
+        });
+        duplicateResolverRef.current = null;
+        setDuplicateDialog(null);
+
+        if (!decision.continued) {
+          return "QUEUED";
+        }
+
+        return uploadOne(sub, { token: data.duplicate_confirmation_token });
+      }
+
       if (!res.ok || !data.success) {
         setSubs((prev) =>
           prev.map((s) =>
@@ -187,7 +253,6 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
             : s
         )
       );
-      // Persist immediately in ranking: refresh sibling table from the DB.
       notifyWorkspaceCandidatesChanged(workspaceId);
       return status;
     } catch {
@@ -198,6 +263,17 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
       );
       return "FAILED";
     }
+  }
+
+  function handleDuplicateContinue() {
+    duplicateResolverRef.current?.({
+      continued: true,
+      token: duplicateDialog?.duplicate_confirmation_token,
+    });
+  }
+
+  function handleDuplicateCancel() {
+    duplicateResolverRef.current?.({ continued: false });
   }
 
   async function uploadAll() {
@@ -227,6 +303,11 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
   }
 
   const names = subs.map((s) => s.name.trim().toLowerCase());
+
+  function matchesWorkspaceName(name: string): boolean {
+    if (!isCheckableCandidateName(name)) return false;
+    return workspaceNames.has(normalizeCandidateName(name));
+  }
 
   return (
     <Card>
@@ -309,6 +390,7 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
             <div className="space-y-2">
               {subs.map((s) => {
                 const isDup = names.filter((n) => n === s.name.trim().toLowerCase()).length > 1;
+                const inWorkspace = matchesWorkspaceName(s.name);
                 return (
                   <div key={s.id} className="rounded-lg border border-slate-200 p-3">
                     <div className="flex items-center gap-2">
@@ -327,6 +409,9 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
                       />
                       <Badge tone={STATUS_TONE[s.status]}>{s.status.replace(/_/g, " ")}</Badge>
                       {isDup && <Badge tone="amber">Possible duplicate</Badge>}
+                      {inWorkspace && (
+                        <Badge tone="amber">Name exists in this job</Badge>
+                      )}
                       <button
                         onClick={() => removeSub(s.id)}
                         className="ml-auto text-xs text-slate-400 hover:text-red-600"
@@ -387,6 +472,17 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
           </>
         )}
       </CardBody>
+
+      {duplicateDialog && (
+        <DuplicateWarningDialog
+          candidateName={duplicateDialog.candidate_name}
+          confidence={duplicateDialog.duplicate_confidence}
+          matches={duplicateDialog.matches}
+          workspaceId={workspaceId}
+          onContinue={handleDuplicateContinue}
+          onCancel={handleDuplicateCancel}
+        />
+      )}
     </Card>
   );
 }

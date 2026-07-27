@@ -3,6 +3,7 @@ import { getSql } from "./client";
 import { audit } from "./audit";
 import type { AppUser } from "@/lib/auth/session";
 import type { VerifiedRecruiterInputs } from "@/lib/types";
+import { normalizeCandidateName } from "@/lib/duplicate-candidate/normalize";
 import type {
   Candidate,
   CandidatePipelineStatus,
@@ -29,13 +30,16 @@ export async function createCandidate(
   input: CandidateInput
 ): Promise<string> {
   const sql = getSql();
+  const normalizedName = input.full_name
+    ? normalizeCandidateName(input.full_name) || null
+    : null;
   const rows = (await sql`
     INSERT INTO candidates (
-      owner_user_id, tenant_id, full_name, email, phone, specialty, location,
+      owner_user_id, tenant_id, full_name, normalized_full_name, email, phone, specialty, location,
       extracted_resume_text, ocr_confidence, extraction_quality, recruiter_notes,
       verified_information, created_by
     ) VALUES (
-      ${user.id}, ${user.tenantId}, ${input.full_name ?? null}, ${input.email ?? null},
+      ${user.id}, ${user.tenantId}, ${input.full_name ?? null}, ${normalizedName}, ${input.email ?? null},
       ${input.phone ?? null}, ${input.specialty ?? null}, ${input.location ?? null},
       ${input.extracted_resume_text ?? null}, ${input.ocr_confidence ?? null},
       ${input.extraction_quality ?? null}, ${input.recruiter_notes ?? null},
@@ -73,9 +77,12 @@ export async function updateCandidate(
   const existing = await getCandidate(user, id);
   if (!existing) return false;
   const sql = getSql();
+  const nextName = input.full_name ?? existing.full_name;
+  const normalizedName = nextName ? normalizeCandidateName(nextName) || null : null;
   await sql`
     UPDATE candidates SET
-      full_name = ${input.full_name ?? existing.full_name},
+      full_name = ${nextName},
+      normalized_full_name = ${normalizedName},
       email = ${input.email ?? existing.email},
       phone = ${input.phone ?? existing.phone},
       specialty = ${input.specialty ?? existing.specialty},
@@ -121,14 +128,57 @@ export async function getJobCandidate(
   user: AppUser,
   workspaceId: string,
   candidateId: string
-): Promise<{ id: string; status: CandidatePipelineStatus; latest_analysis_id: string | null } | null> {
+): Promise<{
+  id: string;
+  status: CandidatePipelineStatus;
+  latest_analysis_id: string | null;
+  updated_at: string;
+} | null> {
   const sql = getSql();
   const rows = (await sql`
-    SELECT id, status, latest_analysis_id FROM job_match_candidates
+    SELECT id, status, latest_analysis_id, updated_at FROM job_match_candidates
     WHERE workspace_id = ${workspaceId} AND candidate_id = ${candidateId}
       AND owner_user_id = ${user.id}
-  `) as Array<{ id: string; status: CandidatePipelineStatus; latest_analysis_id: string | null }>;
+  `) as Array<{
+    id: string;
+    status: CandidatePipelineStatus;
+    latest_analysis_id: string | null;
+    updated_at: string;
+  }>;
   return rows[0] ?? null;
+}
+
+/** Release an ANALYZING lock after a crash, timeout, or explicit retry. */
+export async function releaseAnalyzingLock(
+  user: AppUser,
+  jobMatchCandidateId: string,
+  options: { force?: boolean; staleAfterMs?: number } = {}
+): Promise<boolean> {
+  const sql = getSql();
+  const staleAfterMs = options.staleAfterMs ?? 5 * 60 * 1000;
+
+  if (options.force) {
+    const rows = (await sql`
+      UPDATE job_match_candidates
+      SET status = 'FAILED', updated_at = now()
+      WHERE id = ${jobMatchCandidateId}
+        AND owner_user_id = ${user.id}
+        AND status = 'ANALYZING'
+      RETURNING id
+    `) as { id: string }[];
+    return rows.length > 0;
+  }
+
+  const rows = (await sql`
+    UPDATE job_match_candidates
+    SET status = 'FAILED', updated_at = now()
+    WHERE id = ${jobMatchCandidateId}
+      AND owner_user_id = ${user.id}
+      AND status = 'ANALYZING'
+      AND updated_at < now() - (${staleAfterMs} * interval '1 millisecond')
+    RETURNING id
+  `) as { id: string }[];
+  return rows.length > 0;
 }
 
 export async function setJobCandidateStatus(

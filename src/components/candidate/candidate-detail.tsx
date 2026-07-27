@@ -37,9 +37,12 @@ import {
   type AnalysisProgressStage,
 } from "@/lib/analysis-stages";
 import {
-  analyzeCandidateStream,
+  analyzeCandidateWithDuplicateCheck,
+  DuplicateConfirmationNeededError,
   AnalyzeRequestError,
-} from "@/lib/client/analyze-candidate";
+} from "@/lib/client/analyze-with-duplicate-check";
+import type { DuplicateConfirmationRequired } from "@/lib/duplicate-candidate/messages";
+import { DuplicateWarningDialog } from "@/components/workspace/duplicate-warning-dialog";
 import { notifyWorkspaceCandidatesChanged } from "@/lib/workspace-events";
 
 interface CandidateProps {
@@ -122,6 +125,10 @@ export function CandidateDetail({
     percent: number;
     label: string;
   } | null>(null);
+  const [duplicateDialog, setDuplicateDialog] = useState<DuplicateConfirmationRequired | null>(
+    null
+  );
+  const duplicateResolverRef = React.useRef<((continued: boolean) => void) | null>(null);
 
   // Reconcile local form state when the server props refresh after save/reanalyze.
   React.useEffect(() => {
@@ -190,7 +197,7 @@ export function CandidateDetail({
     }
   }
 
-  async function reanalyze() {
+  async function reanalyze(duplicateConfirmation?: { token: string }) {
     if (!workspaceId) {
       toast("Attach this candidate to a job first.", "error");
       return;
@@ -210,10 +217,11 @@ export function CandidateDetail({
       label: "Preparing candidate data…",
     });
     try {
-      await analyzeCandidateStream({
+      await analyzeCandidateWithDuplicateCheck({
         workspaceId,
         candidateId: candidate.id,
-        body: requestBody,
+        body: { ...requestBody, force_retry: true },
+        duplicateConfirmation,
         onProgress: (event) => {
           const mapped = stageFromEvent(event);
           setAnalysisStage(mapped);
@@ -228,6 +236,20 @@ export function CandidateDetail({
       notifyWorkspaceCandidatesChanged(workspaceId);
       router.refresh();
     } catch (err) {
+      if (err instanceof DuplicateConfirmationNeededError && !duplicateConfirmation) {
+        setAnalysisStage(null);
+        setReanalyzing(false);
+        const continued = await new Promise<boolean>((resolve) => {
+          duplicateResolverRef.current = resolve;
+          setDuplicateDialog(err.duplicate);
+        });
+        duplicateResolverRef.current = null;
+        setDuplicateDialog(null);
+        if (continued) {
+          await reanalyze({ token: err.duplicate.duplicate_confirmation_token });
+        }
+        return;
+      }
       const message =
         err instanceof AnalyzeRequestError ? err.message : "Analysis failed.";
       setAnalysisStage({
@@ -238,8 +260,16 @@ export function CandidateDetail({
       toast(message, "error");
     } finally {
       setReanalyzing(false);
-      setAnalysisStage(null);
+      setAnalysisStage((prev) => (prev?.stage === "completed" ? prev : null));
     }
+  }
+
+  function handleDuplicateContinue() {
+    duplicateResolverRef.current?.(true);
+  }
+
+  function handleDuplicateCancel() {
+    duplicateResolverRef.current?.(false);
   }
 
   async function saveAnswers() {
@@ -354,7 +384,7 @@ export function CandidateDetail({
                 disabled={reanalyzing}
                 availability={availability}
               />
-              <Button onClick={reanalyze} disabled={reanalyzing || !workspaceId}>
+              <Button onClick={() => reanalyze()} disabled={reanalyzing || !workspaceId}>
                 {reanalyzing
                   ? analysisStage?.label ?? option.loadingLabel
                   : analysis
@@ -621,6 +651,17 @@ export function CandidateDetail({
           </div>
         )}
       </div>
+
+      {duplicateDialog && workspaceId && (
+        <DuplicateWarningDialog
+          candidateName={duplicateDialog.candidate_name}
+          confidence={duplicateDialog.duplicate_confidence}
+          matches={duplicateDialog.matches}
+          workspaceId={workspaceId}
+          onContinue={handleDuplicateContinue}
+          onCancel={handleDuplicateCancel}
+        />
+      )}
     </div>
   );
 }

@@ -32,9 +32,8 @@ export const config = {
     process.env.ANTHROPIC_MODEL ??
     "claude-sonnet-4-5-20250929",
   claudeTimeoutMs: Number(process.env.CLAUDE_TIMEOUT_MS ?? "180000"),
-  // Optimized max_tokens: 4096 is sufficient for the analysis schema
-  // Previously was 8192 which caused longer generation times
-  claudeMaxTokens: Number(process.env.CLAUDE_MAX_TOKENS ?? "4096"),
+  // Full analysis JSON often exceeds 4096 tokens; truncation causes schema validation failures.
+  claudeMaxTokens: Number(process.env.CLAUDE_MAX_TOKENS ?? "8192"),
   claudeTemperature: Number(process.env.CLAUDE_TEMPERATURE ?? "0"),
   // Enable extended thinking for complex cases (default: false for speed)
   claudeExtendedThinking: process.env.CLAUDE_EXTENDED_THINKING === "true",

@@ -1,13 +1,24 @@
 import type { AnalysisProgressEvent } from "@/lib/analysis-stages";
+import type { DuplicateConfirmationRequired } from "@/lib/duplicate-candidate/messages";
+import { isDuplicateConfirmationRequired } from "@/lib/duplicate-candidate/messages";
 
 export class AnalyzeRequestError extends Error {
   code?: string;
-  constructor(message: string, code?: string) {
+  duplicateConfirmation?: DuplicateConfirmationRequired;
+
+  constructor(
+    message: string,
+    code?: string,
+    duplicateConfirmation?: DuplicateConfirmationRequired
+  ) {
     super(message);
     this.name = "AnalyzeRequestError";
     this.code = code;
+    this.duplicateConfirmation = duplicateConfirmation;
   }
 }
+
+export type AnalyzeStreamResult = AnalysisProgressEvent;
 
 /**
  * Starts workspace candidate analysis and consumes NDJSON progress events.
@@ -19,7 +30,7 @@ export async function analyzeCandidateStream(options: {
   body: Record<string, unknown>;
   onProgress?: (event: AnalysisProgressEvent) => void;
   signal?: AbortSignal;
-}): Promise<AnalysisProgressEvent> {
+}): Promise<AnalyzeStreamResult> {
   const { workspaceId, candidateId, body, onProgress, signal } = options;
 
   const res = await fetch(
@@ -37,6 +48,21 @@ export async function analyzeCandidateStream(options: {
 
   const contentType = res.headers.get("content-type") ?? "";
 
+  if (!res.ok && contentType.includes("application/json")) {
+    const data = (await res.json()) as Record<string, unknown>;
+    if (isDuplicateConfirmationRequired(data)) {
+      throw new AnalyzeRequestError(
+        "Duplicate confirmation required.",
+        "DUPLICATE_CONFIRMATION_REQUIRED",
+        data
+      );
+    }
+    throw new AnalyzeRequestError(
+      String(data.error ?? "Analysis failed."),
+      typeof data.code === "string" ? data.code : undefined
+    );
+  }
+
   if (contentType.includes("application/x-ndjson") && res.body) {
     return readNdjsonStream(res, onProgress);
   }
@@ -44,6 +70,13 @@ export async function analyzeCandidateStream(options: {
   // Non-streaming JSON (errors before the stream starts, or legacy responses).
   const data = (await res.json()) as Record<string, unknown>;
   if (!res.ok || data.success === false) {
+    if (isDuplicateConfirmationRequired(data)) {
+      throw new AnalyzeRequestError(
+        "Duplicate confirmation required.",
+        "DUPLICATE_CONFIRMATION_REQUIRED",
+        data
+      );
+    }
     throw new AnalyzeRequestError(
       String(data.error ?? "Analysis failed."),
       typeof data.code === "string" ? data.code : undefined
@@ -70,7 +103,7 @@ export async function analyzeCandidateStream(options: {
 async function readNdjsonStream(
   res: Response,
   onProgress?: (event: AnalysisProgressEvent) => void
-): Promise<AnalysisProgressEvent> {
+): Promise<AnalyzeStreamResult> {
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";

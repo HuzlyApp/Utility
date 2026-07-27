@@ -104,17 +104,20 @@ describe("Grok AI Integration", () => {
       expect(parsed.ok).toBe(true);
     });
 
-    it("rejects more than 10 screening questions (test 9)", () => {
-      const invalid = makeAiResult();
-      invalid.screening_questions = Array(12).fill(null).map((_, i) => ({
+    it("truncates more than 10 screening questions instead of failing (test 9)", () => {
+      const input = makeAiResult();
+      input.screening_questions = Array(12).fill(null).map((_, i) => ({
         priority: i + 1,
         question: `Question ${i + 1}`,
         reason: "Test reason",
         related_requirement: "Test requirement",
       }));
 
-      const parsed = parseAiResult(JSON.stringify(invalid));
-      expect(parsed.ok).toBe(false);
+      const parsed = parseAiResult(JSON.stringify(input));
+      expect(parsed.ok).toBe(true);
+      if (parsed.ok) {
+        expect(parsed.data.screening_questions).toHaveLength(10);
+      }
     });
   });
 

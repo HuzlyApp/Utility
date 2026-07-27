@@ -8,6 +8,7 @@ import {
   setJobCandidateStatus,
   setLatestAnalysis,
   updateCandidate,
+  releaseAnalyzingLock,
 } from "@/lib/dal/candidates";
 import { getEntityImageBytes } from "@/lib/dal/fileStore";
 import { saveCandidateAnalysis } from "@/lib/dal/analyses";
@@ -31,6 +32,12 @@ import {
   type AnalysisProgressEvent,
   type AnalysisProgressStage,
 } from "@/lib/analysis-stages";
+import { findDuplicateCandidates } from "@/lib/duplicate-candidate/find-duplicates";
+import {
+  consumeDuplicateConfirmationToken,
+  verifyDuplicateConfirmationToken,
+} from "@/lib/duplicate-candidate/confirmation-token";
+import type { DuplicateCheckResult } from "@/lib/duplicate-candidate/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -38,6 +45,7 @@ export const dynamic = "force-dynamic";
 
 // In-process duplicate-request guard for workspace analyses.
 const inFlight = new Set<string>();
+const STALE_ANALYZING_MS = 5 * 60 * 1000;
 
 function modelLabel(optionId: string): string {
   return AI_MODEL_OPTIONS.find((o) => o.id === optionId)?.label ?? "AI";
@@ -121,21 +129,32 @@ export async function POST(
     const jmc = await getJobCandidate(user, params.workspaceId, params.candidateId);
     if (!jmc) return fail("Candidate is not attached to this workspace.", 404, "NOT_ATTACHED");
 
-    // Database-level guard: if already analyzing, reject duplicate.
-    if (jmc.status === "ANALYZING") {
-      return fail(
-        "An analysis is already in progress for this candidate.",
-        409,
-        "ALREADY_ANALYZING"
-      );
-    }
-
     let body: Record<string, unknown> = {};
     try {
       const text = await req.text();
       if (text.trim()) body = JSON.parse(text) as Record<string, unknown>;
     } catch {
       return fail("Invalid JSON body.", 400, "INVALID_JSON");
+    }
+
+    // Database-level guard: reject concurrent runs unless the prior lock is stale.
+    if (jmc.status === "ANALYZING") {
+      const forceRetry = body.force_retry === true;
+      const analyzingForMs = Date.now() - new Date(jmc.updated_at).getTime();
+      const isStale = analyzingForMs > STALE_ANALYZING_MS;
+
+      if (forceRetry || isStale) {
+        await releaseAnalyzingLock(user, jmc.id, {
+          force: forceRetry,
+          staleAfterMs: STALE_ANALYZING_MS,
+        });
+      } else {
+        return fail(
+          "An analysis is already in progress for this candidate. Wait for it to finish or retry in a few minutes.",
+          409,
+          "ALREADY_ANALYZING"
+        );
+      }
     }
 
     const selection = resolveAiSelection(body);
@@ -154,6 +173,66 @@ export async function POST(
         "DUPLICATE_REQUEST"
       );
     }
+
+    const duplicateCheck = await findDuplicateCandidates(
+      user,
+      params.workspaceId,
+      params.candidateId,
+      candidate.full_name
+    );
+
+    const continueAfterDuplicateWarning =
+      body.continue_after_duplicate_warning === true;
+    const duplicateConfirmationToken =
+      typeof body.duplicate_confirmation_token === "string"
+        ? body.duplicate_confirmation_token
+        : undefined;
+
+    let duplicateOverride: DuplicateCheckResult | null = null;
+
+    if (duplicateCheck) {
+      if (!continueAfterDuplicateWarning || !duplicateConfirmationToken) {
+        return NextResponse.json(
+          {
+            success: false,
+            status: "DUPLICATE_CONFIRMATION_REQUIRED",
+            code: "DUPLICATE_CONFIRMATION_REQUIRED",
+            candidate_name: duplicateCheck.candidate_name,
+            duplicate_confidence: duplicateCheck.duplicate_confidence,
+            matches: duplicateCheck.matches,
+            duplicate_confirmation_token: duplicateCheck.duplicate_confirmation_token,
+          },
+          { status: 409 }
+        );
+      }
+
+      const matchedCandidateIds = duplicateCheck.matches.map((m) => m.candidate_id);
+      const matchedAnalysisIds = duplicateCheck.matches
+        .map((m) => m.analysis_id)
+        .filter((id): id is string => Boolean(id));
+
+      const verified = verifyDuplicateConfirmationToken(duplicateConfirmationToken, {
+        userId: user.id,
+        tenantId: user.tenantId,
+        candidateId: params.candidateId,
+        normalizedName: duplicateCheck.normalized_name,
+        matchedCandidateIds,
+        matchedAnalysisIds,
+        confidence: duplicateCheck.duplicate_confidence,
+      });
+
+      if (!verified.ok) {
+        return fail(
+          "Duplicate confirmation is invalid or expired. Please review the warning and try again.",
+          409,
+          verified.reason
+        );
+      }
+
+      consumeDuplicateConfirmationToken(verified.payload.jti, verified.payload.exp);
+      duplicateOverride = duplicateCheck;
+    }
+
     inFlight.add(idempotencyKey);
 
     const stream = new ReadableStream<Uint8Array>({
@@ -305,6 +384,12 @@ export async function POST(
             model: analysis.model,
             provider: analysis.provider,
             analysisStatus: "completed",
+            duplicateWarningAcknowledged: Boolean(duplicateOverride),
+            duplicateConfidence: duplicateOverride?.duplicate_confidence ?? null,
+            candidateName: candidate.full_name,
+            matchedAnalysisIds: duplicateOverride?.matches
+              .map((m) => m.analysis_id)
+              .filter((id): id is string => Boolean(id)),
           });
 
           // Status becomes ANALYZED only after the analysis row exists.

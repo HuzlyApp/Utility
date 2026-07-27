@@ -23,6 +23,7 @@ const sql = neon(url);
 const files = [
   new URL("./dashboard-schema.sql", import.meta.url),
   new URL("./ai-provider-schema.sql", import.meta.url),
+  new URL("./duplicate-candidate-schema.sql", import.meta.url),
 ];
 
 // Naive splitter: safe here because the schema has no PL/pgSQL bodies.

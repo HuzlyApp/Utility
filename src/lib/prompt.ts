@@ -3,6 +3,7 @@ import type {
   VerifiedRecruiterInputs,
 } from "./types";
 import type { NormalizedJobRequirements } from "./job-cache";
+import type { CachedJobRequirements } from "./ai/job-cache";
 
 // Concise system prompt: rules and structure reference without repeating the full schema.
 export const SYSTEM_PROMPT = `You are a healthcare staffing candidate-to-job matching analyst.
@@ -145,6 +146,8 @@ export interface UserPromptArgs {
   recent_experience_months: number;
   /** Optional pre-normalized job requirements to avoid re-parsing the same job. */
   normalized_job_requirements?: NormalizedJobRequirements;
+  /** Cached job requirements from ai/job-cache (string lists). */
+  cached_job_requirements?: CachedJobRequirements;
 }
 
 function formatRequirementsList(items: string[]): string {
@@ -154,8 +157,82 @@ function formatRequirementsList(items: string[]): string {
 
 // Build a concise user prompt that avoids repeating job text when structured
 // requirements are already available.
+function buildCachedRequirementsPrompt(args: UserPromptArgs): string | null {
+  const cached = args.cached_job_requirements;
+  if (!cached) return null;
+
+  const verified = JSON.stringify(args.verified_recruiter_inputs ?? {}, null, 2);
+  const specialty =
+    cached.specialtyRequirements[0] ?? args.structured_job_fields?.specialty ?? "";
+  const location =
+    cached.locationConstraints || args.structured_job_fields?.location || "";
+
+  return `Analyze the candidate's match for the healthcare job below.
+
+Treat "recent" experience as work within the past ${args.recent_experience_months} months.
+
+JOB INFORMATION
+
+Job ID: ${args.job_id ?? ""}
+Job title: ${args.job_title ?? ""}
+MSP or client: ${args.msp_name ?? ""}
+Specialty: ${specialty}
+Location: ${location}
+
+MANDATORY REQUIREMENTS
+${formatRequirementsList(cached.mandatoryRequirements)}
+
+PREFERRED REQUIREMENTS
+${formatRequirementsList(cached.preferredRequirements)}
+
+REQUIRED LICENSES
+${formatRequirementsList(cached.requiredLicenses)}
+
+REQUIRED CERTIFICATIONS
+${formatRequirementsList(cached.requiredCertifications)}
+
+EDUCATION REQUIREMENTS
+${formatRequirementsList(cached.educationRequirements)}
+
+${cached.requiredYearsExperience ? `REQUIRED EXPERIENCE: ${cached.requiredYearsExperience}\n` : ""}
+FULL JOB DESCRIPTION (for reference only; requirements above are authoritative)
+${args.job_description_text}
+
+CANDIDATE INFORMATION
+
+Candidate résumé text:
+${args.resume_text}
+
+Recruiter-provided verified information:
+${verified}
+
+General recruiter notes:
+${args.recruiter_notes ?? ""}
+
+INSTRUCTIONS
+
+1. Compare each requirement above against the candidate's documented background.
+2. Calculate relevant experience without double-counting overlapping employment.
+3. Identify confirmed qualifications, partial evidence, missing information, conflicts, and clearly unmet requirements.
+4. Assign recommended subscores.
+5. Recommend an overall match score and match category.
+6. Apply the mandatory-requirement override when appropriate.
+7. Recommend recruiter action.
+8. Generate no more than 5 focused screening questions.
+9. Do not infer qualifications that are not documented.
+10. Quote or closely reference exact candidate evidence for every qualification.
+11. Keep evidence statements concise (1-2 sentences each).
+12. Return valid JSON only using the required response structure.
+
+Required JSON structure:
+${RESPONSE_SCHEMA}`;
+}
+
 export function buildUserPrompt(args: UserPromptArgs): string {
   const verified = JSON.stringify(args.verified_recruiter_inputs ?? {}, null, 2);
+
+  const cachedPrompt = buildCachedRequirementsPrompt(args);
+  if (cachedPrompt) return cachedPrompt;
 
   // If normalized requirements are provided, use them instead of asking the model
   // to rediscover requirements from the full job description.

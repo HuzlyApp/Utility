@@ -131,7 +131,7 @@ export function parseAiResult(
   | { ok: false; error: string; parsedJson?: unknown } {
   let json: unknown;
   try {
-    json = JSON.parse(stripCodeFences(raw));
+    json = normalizeParsedJson(JSON.parse(stripCodeFences(raw)));
   } catch (err) {
     return {
       ok: false,
@@ -149,6 +149,15 @@ export function parseAiResult(
     };
   }
   return { ok: true, data: result.data };
+}
+
+function normalizeParsedJson(json: unknown): unknown {
+  if (!json || typeof json !== "object" || Array.isArray(json)) return json;
+  const record = json as Record<string, unknown>;
+  if (Array.isArray(record.screening_questions) && record.screening_questions.length > 10) {
+    return { ...record, screening_questions: record.screening_questions.slice(0, 10) };
+  }
+  return json;
 }
 
 // Models occasionally wrap JSON in markdown fences despite instructions; strip them defensively.
