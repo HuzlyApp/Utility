@@ -4,11 +4,11 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { getWorkspace } from "@/lib/dal/workspaces";
 import { listWorkspaceCandidates } from "@/lib/dal/candidates";
 import { Card, CardBody, CardHeader, Badge } from "@/components/ui/primitives";
-import { CreateJobForm } from "@/components/jobs/create-job-form";
 import { DeleteJobButton } from "@/components/jobs/delete-job-button";
 import { AddCandidates } from "@/components/workspace/add-candidates";
 import { RankingTable } from "@/components/workspace/ranking-table";
 import { JobDescriptionPanel } from "@/components/workspace/job-description-panel";
+import { jobRoutes } from "@/lib/routes";
 
 export const dynamic = "force-dynamic";
 
@@ -22,37 +22,13 @@ export default async function WorkspacePage({
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
+  // Legacy edit deep-link → dedicated edit route.
+  if (searchParams.edit) {
+    redirect(jobRoutes.edit(params.jobId));
+  }
+
   const ws = await getWorkspace(user, params.jobId);
   if (!ws) notFound();
-
-  if (searchParams.edit) {
-    return (
-      <div className="mx-auto max-w-4xl space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-slate-900">Edit Job</h1>
-          <Link href={`/jobs/${ws.id}`} className="text-sm text-brand-600 hover:underline">
-            Back to workspace
-          </Link>
-        </div>
-        <CreateJobForm
-          workspaceId={ws.id}
-          initial={{
-            job_ref: ws.job_ref ?? "",
-            job_title: ws.job_title ?? "",
-            msp_or_client: ws.msp_or_client ?? "",
-            specialty: ws.specialty ?? "",
-            department: ws.department ?? "",
-            location: ws.location ?? "",
-            shift: ws.shift ?? "",
-            start_date: ws.start_date ?? "",
-            job_status: ws.job_status,
-            jd: ws.job_description_text ?? "",
-            structured: ws.structured_requirements ?? {},
-          }}
-        />
-      </div>
-    );
-  }
 
   const candidates = await listWorkspaceCandidates(user, params.jobId);
   const sr = ws.structured_requirements ?? {};
@@ -81,7 +57,7 @@ export default async function WorkspacePage({
         <div className="flex flex-wrap gap-2">
           <Badge tone={ws.job_status === "OPEN" ? "green" : "slate"}>{ws.job_status}</Badge>
           <Link
-            href={`/jobs/${ws.id}?edit=1`}
+            href={jobRoutes.edit(ws.id)}
             className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
           >
             Edit Job

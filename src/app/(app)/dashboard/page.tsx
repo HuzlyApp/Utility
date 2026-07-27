@@ -9,17 +9,45 @@ import { Card, CardBody } from "@/components/ui/primitives";
 import { JobTiles } from "@/components/dashboard/job-tiles";
 import { RecentAnalyses } from "@/components/dashboard/recent-analyses";
 import { redirect } from "next/navigation";
+import { dashboardStatRoutes } from "@/lib/routes";
+import { cn } from "@/lib/cn";
 
 export const dynamic = "force-dynamic";
 
-function StatCard({ label, value, tone }: { label: string; value: number; tone: string }) {
+function StatCard({
+  label,
+  value,
+  tone,
+  href,
+}: {
+  label: string;
+  value: number;
+  tone: string;
+  href: string;
+}) {
   return (
-    <Card>
-      <CardBody className="py-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-        <p className={`mt-1 text-3xl font-bold ${tone}`}>{value}</p>
-      </CardBody>
-    </Card>
+    <Link
+      href={href}
+      aria-label={`View ${label}`}
+      className={cn(
+        "group block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+      )}
+    >
+      <Card
+        className={cn(
+          "h-full cursor-pointer transition-all duration-150",
+          "group-hover:-translate-y-0.5 group-hover:border-brand-300 group-hover:shadow-md",
+          "group-focus-visible:border-brand-300"
+        )}
+      >
+        <CardBody className="py-4">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+            {label}
+          </p>
+          <p className={`mt-1 text-3xl font-bold ${tone}`}>{value}</p>
+        </CardBody>
+      </Card>
+    </Link>
   );
 }
 
@@ -51,16 +79,49 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
-        <StatCard label="Active Jobs" value={stats.active_jobs} tone="text-slate-900" />
-        <StatCard label="Total Candidates" value={stats.total_candidates} tone="text-slate-900" />
-        <StatCard label="Strong Matches" value={stats.strong_matches} tone="text-green-600" />
-        <StatCard label="Needs Verification" value={stats.needs_verification} tone="text-amber-600" />
-        <StatCard label="Ready to Submit" value={stats.ready_to_submit} tone="text-emerald-600" />
+        <StatCard
+          label="Active Jobs"
+          value={stats.active_jobs}
+          tone="text-slate-900"
+          href={dashboardStatRoutes.activeJobs}
+        />
+        <StatCard
+          label="Total Candidates"
+          value={stats.total_candidates}
+          tone="text-slate-900"
+          href={dashboardStatRoutes.totalCandidates}
+        />
+        <StatCard
+          label="Strong Matches"
+          value={stats.strong_matches}
+          tone="text-green-600"
+          href={dashboardStatRoutes.strongMatches}
+        />
+        <StatCard
+          label="Needs Verification"
+          value={stats.needs_verification}
+          tone="text-amber-600"
+          href={dashboardStatRoutes.needsVerification}
+        />
+        <StatCard
+          label="Ready to Submit"
+          value={stats.ready_to_submit}
+          tone="text-emerald-600"
+          href={dashboardStatRoutes.readyToSubmit}
+        />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr,320px]">
         <section>
-          <h2 className="mb-3 text-sm font-semibold text-slate-700">Job Workspaces</h2>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-700">Job Workspaces</h2>
+            <Link
+              href={dashboardStatRoutes.activeJobs}
+              className="text-xs font-medium text-brand-600 hover:underline"
+            >
+              View all
+            </Link>
+          </div>
           <JobTiles workspaces={workspaces} />
         </section>
         <section>

@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
 import { JobSourceInput } from "./job-source-input";
+import { jobRoutes } from "@/lib/routes";
 import type { StructuredJobFields } from "@/lib/types";
 
 const JOB_STATUSES = ["OPEN", "ON_HOLD", "FILLED", "CLOSED"] as const;
@@ -99,7 +100,11 @@ export function CreateJobForm({
         return;
       }
       toast(workspaceId ? "Job updated." : "Job workspace created.", "success");
-      router.push(`/jobs/${workspaceId ?? data.id}#add-candidates`);
+      router.push(
+        workspaceId
+          ? jobRoutes.workspace(workspaceId)
+          : jobRoutes.addCandidates(data.id)
+      );
       router.refresh();
     } catch {
       toast("Could not save the job.", "error");

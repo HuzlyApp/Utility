@@ -8,8 +8,23 @@ import { Badge } from "@/components/ui/primitives";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/jobs", label: "Jobs" },
+  { href: "/candidates", label: "Candidates" },
   { href: "/jobs/new", label: "New Job" },
 ];
+
+function isNavActive(href: string, pathname: string): boolean {
+  if (href === "/dashboard") return pathname === "/dashboard";
+  if (href === "/jobs/new") return pathname.startsWith("/jobs/new");
+  if (href === "/jobs") {
+    return (
+      pathname === "/jobs" ||
+      (pathname.startsWith("/jobs/") && !pathname.startsWith("/jobs/new"))
+    );
+  }
+  if (href === "/candidates") return pathname.startsWith("/candidates");
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 export function AppHeader({
   email,
@@ -47,10 +62,7 @@ export function AppHeader({
           </Link>
           <nav className="hidden items-center gap-1 sm:flex">
             {NAV.map((item) => {
-              const active =
-                item.href === "/dashboard"
-                  ? pathname === "/dashboard"
-                  : pathname.startsWith(item.href);
+              const active = isNavActive(item.href, pathname);
               return (
                 <Link
                   key={item.href}

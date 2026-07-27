@@ -230,6 +230,113 @@ export async function removeCandidateFromJob(
   return true;
 }
 
+export interface DashboardCandidateRow {
+  candidate_id: string;
+  full_name: string | null;
+  specialty: string | null;
+  location: string | null;
+  workspace_id: string | null;
+  job_title: string | null;
+  match_score: number | null;
+  match_category: string | null;
+  submission_readiness: string | null;
+  updated_at: string;
+}
+
+/**
+ * Candidates for the dashboard list page. When a filter is set, returns
+ * job-match rows whose latest analysis matches the dashboard statistic.
+ */
+export async function listDashboardCandidates(
+  user: AppUser,
+  opts?: {
+    matchCategory?: string;
+    submissionReadiness?: string;
+  }
+): Promise<DashboardCandidateRow[]> {
+  const sql = getSql();
+  const matchCategory = opts?.matchCategory ?? null;
+  const submissionReadiness = opts?.submissionReadiness ?? null;
+  const filtered = Boolean(matchCategory || submissionReadiness);
+
+  if (!filtered) {
+    const rows = (await sql`
+      SELECT
+        c.id AS candidate_id,
+        c.full_name,
+        c.specialty,
+        c.location,
+        (
+          SELECT jmc.workspace_id
+          FROM job_match_candidates jmc
+          WHERE jmc.candidate_id = c.id AND jmc.owner_user_id = ${user.id}
+          ORDER BY jmc.updated_at DESC
+          LIMIT 1
+        ) AS workspace_id,
+        (
+          SELECT w.job_title
+          FROM job_match_candidates jmc
+          JOIN job_match_workspaces w ON w.id = jmc.workspace_id
+          WHERE jmc.candidate_id = c.id AND jmc.owner_user_id = ${user.id}
+          ORDER BY jmc.updated_at DESC
+          LIMIT 1
+        ) AS job_title,
+        (
+          SELECT a.overall_match_score
+          FROM job_match_candidates jmc
+          LEFT JOIN candidate_match_analyses a ON a.id = jmc.latest_analysis_id
+          WHERE jmc.candidate_id = c.id AND jmc.owner_user_id = ${user.id}
+          ORDER BY jmc.updated_at DESC
+          LIMIT 1
+        ) AS match_score,
+        (
+          SELECT a.match_category
+          FROM job_match_candidates jmc
+          LEFT JOIN candidate_match_analyses a ON a.id = jmc.latest_analysis_id
+          WHERE jmc.candidate_id = c.id AND jmc.owner_user_id = ${user.id}
+          ORDER BY jmc.updated_at DESC
+          LIMIT 1
+        ) AS match_category,
+        (
+          SELECT a.submission_readiness
+          FROM job_match_candidates jmc
+          LEFT JOIN candidate_match_analyses a ON a.id = jmc.latest_analysis_id
+          WHERE jmc.candidate_id = c.id AND jmc.owner_user_id = ${user.id}
+          ORDER BY jmc.updated_at DESC
+          LIMIT 1
+        ) AS submission_readiness,
+        c.updated_at
+      FROM candidates c
+      WHERE c.owner_user_id = ${user.id}
+      ORDER BY c.updated_at DESC
+    `) as DashboardCandidateRow[];
+    return rows;
+  }
+
+  const rows = (await sql`
+    SELECT
+      c.id AS candidate_id,
+      c.full_name,
+      c.specialty,
+      c.location,
+      jmc.workspace_id,
+      w.job_title,
+      a.overall_match_score AS match_score,
+      a.match_category,
+      a.submission_readiness,
+      jmc.updated_at
+    FROM job_match_candidates jmc
+    JOIN candidates c ON c.id = jmc.candidate_id
+    JOIN job_match_workspaces w ON w.id = jmc.workspace_id
+    JOIN candidate_match_analyses a ON a.id = jmc.latest_analysis_id
+    WHERE jmc.owner_user_id = ${user.id}
+      AND (${matchCategory}::text IS NULL OR a.match_category = ${matchCategory})
+      AND (${submissionReadiness}::text IS NULL OR a.submission_readiness = ${submissionReadiness})
+    ORDER BY a.overall_match_score DESC NULLS LAST, c.full_name ASC
+  `) as DashboardCandidateRow[];
+  return rows;
+}
+
 // Resolves a workspace this candidate belongs to (used when the detail page is
 // opened without an explicit workspace query).
 export async function getPrimaryWorkspaceId(

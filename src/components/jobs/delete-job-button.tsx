@@ -24,7 +24,8 @@ export function DeleteJobButton({
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
 
-  async function onDelete() {
+  async function onDelete(e?: React.MouseEvent) {
+    e?.stopPropagation();
     const label = jobTitle?.trim() || "this job";
     const candNote =
       candidateCount > 0
