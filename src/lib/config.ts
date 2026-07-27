@@ -38,6 +38,10 @@ export const config = {
   // Neon Auth (Managed Better Auth)
   neonAuthBaseUrl: process.env.NEON_AUTH_BASE_URL ?? process.env.AUTH_URL ?? "",
   neonAuthCookieSecret: process.env.NEON_AUTH_COOKIE_SECRET ?? "",
+  neonAuthCookieDomain: process.env.NEON_AUTH_COOKIE_DOMAIN ?? "",
+  neonAuthSessionDataTtlSeconds: Number(
+    process.env.NEON_AUTH_SESSION_DATA_TTL_SECONDS ?? "604800"
+  ),
 
   // Image / OCR limits
   maxImageDimension: Number(process.env.MAX_IMAGE_DIMENSION ?? "10000"),

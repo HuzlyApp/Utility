@@ -13,7 +13,12 @@ export async function POST(req: NextRequest) {
     if (!email || !password) {
       return fail("Enter your email and password.", 400, "MISSING_FIELDS");
     }
-    const { error } = await auth.signIn.email({ email, password });
+    const { error } = await auth.signIn.email({
+      email,
+      password,
+      // Keep users signed in across tabs/direct links until session expiry.
+      rememberMe: true,
+    });
     if (error) {
       // Do not reveal whether the email exists.
       return fail("Invalid email or password.", 401, "INVALID_CREDENTIALS");

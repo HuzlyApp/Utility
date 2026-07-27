@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button, Card, CardBody, Field, TextInput } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
 
-export function LoginForm() {
+export function LoginForm({ returnTo }: { returnTo: string }) {
   const router = useRouter();
   const { toast } = useToast();
   const [email, setEmail] = useState("");
@@ -32,7 +32,7 @@ export function LoginForm() {
         setError(data.error ?? "Invalid email or password.");
         return;
       }
-      router.push("/dashboard");
+      router.push(returnTo);
       router.refresh();
     } catch {
       setError("Sign in failed. Please try again.");

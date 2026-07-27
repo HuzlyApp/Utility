@@ -28,6 +28,9 @@ function getAuthInstance(): NeonAuthInstance {
       baseUrl: config.neonAuthBaseUrl,
       cookies: {
         secret: resolveCookieSecret(),
+        sessionDataTtl: config.neonAuthSessionDataTtlSeconds,
+        sameSite: "lax",
+        domain: config.neonAuthCookieDomain || undefined,
       },
       logLevel: "warn",
     });

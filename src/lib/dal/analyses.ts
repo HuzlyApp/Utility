@@ -121,7 +121,9 @@ export async function getAnalysis(
            score_adjustments_json, created_at, model_name,
            ai_provider, ai_model, analysis_status, analyzed_at
     FROM candidate_match_analyses
-    WHERE id = ${id} AND owner_user_id = ${user.id}
+    WHERE id = ${id}
+      AND owner_user_id = ${user.id}
+      AND tenant_id = ${user.tenantId}
   `) as Array<Record<string, unknown>>;
   const row = rows[0];
   if (!row) return null;
@@ -162,7 +164,9 @@ export async function listCandidateAnalyses(
     SELECT id, overall_match_score, match_category, submission_readiness,
            model_name, ai_provider, ai_model, created_at
     FROM candidate_match_analyses
-    WHERE candidate_id = ${candidateId} AND owner_user_id = ${user.id}
+    WHERE candidate_id = ${candidateId}
+      AND owner_user_id = ${user.id}
+      AND tenant_id = ${user.tenantId}
     ORDER BY created_at DESC
   `) as AnalysisHistoryItem[];
   return rows;

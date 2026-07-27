@@ -1,13 +1,19 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/session";
+import { getPostLoginRedirect } from "@/lib/auth/return-to";
 import { LoginForm } from "./login-form";
 
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: { returnTo?: string };
+}) {
   const user = await getCurrentUser();
+  const returnTo = getPostLoginRedirect(searchParams.returnTo);
   if (user) {
-    redirect(user.mustChangePassword ? "/change-password" : "/dashboard");
+    redirect(user.mustChangePassword ? "/change-password" : returnTo);
   }
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12">
@@ -23,7 +29,7 @@ export default async function LoginPage() {
             </p>
           </div>
         </div>
-        <LoginForm />
+        <LoginForm returnTo={returnTo} />
         <p className="mt-6 text-center text-xs text-slate-400">
           AI-assisted decision support. A recruiter makes the final decision.
         </p>
