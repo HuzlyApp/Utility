@@ -166,3 +166,14 @@ function stripCodeFences(raw: string): string {
   const fenceMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   return fenceMatch ? fenceMatch[1].trim() : trimmed;
 }
+
+/** Heuristic for JSON cut off by max_tokens output limits. */
+export function isLikelyTruncatedJsonError(error: string): boolean {
+  return (
+    error.includes("not valid JSON") ||
+    error.includes("Unterminated string") ||
+    error.includes("Unexpected end of JSON") ||
+    error.includes("Expected ','") ||
+    error.includes("Unexpected token")
+  );
+}

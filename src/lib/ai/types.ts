@@ -65,6 +65,8 @@ export interface ProviderCallResult {
   };
   /** Granular performance timings when available. */
   perf?: AnalysisPerformanceMetrics;
+  /** Anthropic stop_reason when available (e.g. end_turn, max_tokens). */
+  stopReason?: string;
   /** Provider-internal timing metadata (not part of public contract). */
   _timeToFirstByteMs?: number;
   _generationMs?: number;
@@ -77,7 +79,12 @@ export interface ProviderAdapter {
   resolveModel(requested?: string): string;
   complete(
     messages: ChatMessage[],
-    opts: { model: string; attemptNumber: number; meta: AnalysisCallMeta }
+    opts: {
+      model: string;
+      attemptNumber: number;
+      meta: AnalysisCallMeta;
+      maxTokens?: number;
+    }
   ): Promise<ProviderCallResult>;
 }
 

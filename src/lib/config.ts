@@ -33,7 +33,7 @@ export const config = {
     "claude-sonnet-4-5-20250929",
   claudeTimeoutMs: Number(process.env.CLAUDE_TIMEOUT_MS ?? "180000"),
   // Full analysis JSON often exceeds 4096 tokens; truncation causes schema validation failures.
-  claudeMaxTokens: Number(process.env.CLAUDE_MAX_TOKENS ?? "8192"),
+  claudeMaxTokens: Number(process.env.CLAUDE_MAX_TOKENS ?? "16384"),
   claudeTemperature: Number(process.env.CLAUDE_TEMPERATURE ?? "0"),
   // Enable extended thinking for complex cases (default: false for speed)
   claudeExtendedThinking: process.env.CLAUDE_EXTENDED_THINKING === "true",
@@ -62,11 +62,10 @@ export const persistenceEnabled = () => Boolean(config.databaseUrl);
 export const authConfigured = () =>
   Boolean(config.neonAuthBaseUrl && config.neonAuthCookieSecret);
 
-/** Get effective max_tokens based on use case */
-export function getClaudeMaxTokens(useCase: "standard" | "complex" = "standard"): number {
-  if (useCase === "complex" && config.claudeExtendedThinking) {
-    // For complex cases with extended thinking, allow more tokens
-    return Math.max(config.claudeMaxTokens, 8192);
-  }
-  return config.claudeMaxTokens;
+/** Scale output budget for long résumés that produce large requirement lists. */
+export function getClaudeMaxTokensForAnalysis(resumeCharCount: number): number {
+  const configured = config.claudeMaxTokens;
+  if (resumeCharCount > 10_000) return Math.max(configured, 16_384);
+  if (resumeCharCount > 6_000) return Math.max(configured, 12_288);
+  return configured;
 }

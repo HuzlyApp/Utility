@@ -50,6 +50,7 @@ export interface ClaudeCallOptions {
   model: string;
   attemptNumber: number;
   meta: AnalysisCallMeta;
+  maxTokens?: number;
   timer?: PerformanceTimer;
   onFirstToken?: () => void;
 }
@@ -96,7 +97,7 @@ export const claudeProvider: ProviderAdapter = {
 
     const body: Record<string, unknown> = {
       model: opts.model,
-      max_tokens: config.claudeMaxTokens,
+      max_tokens: opts.maxTokens ?? config.claudeMaxTokens,
       temperature: config.claudeTemperature,
       system,
       messages: anthropicMessages,
@@ -163,6 +164,7 @@ export const claudeProvider: ProviderAdapter = {
           | { type: "thinking"; thinking: string }
         >;
         usage?: { input_tokens?: number; output_tokens?: number };
+        stop_reason?: string;
         error?: { message?: string; type?: string };
       } | null;
 
@@ -214,12 +216,14 @@ export const claudeProvider: ProviderAdapter = {
         totalTokens,
         responseLength: content.length,
         timeToFirstByteMs: ttfbOverride,
+        stopReason: bodyJson?.stop_reason,
       });
 
       return {
         content,
         model: opts.model,
         tokenUsage: { promptTokens, completionTokens, totalTokens },
+        stopReason: bodyJson?.stop_reason,
         // Expose measured TTFB so callers can report it even when they supplied a timer
         _timeToFirstByteMs: ttfbOverride,
         _generationMs: generationMs,

@@ -155,6 +155,13 @@ function formatRequirementsList(items: string[]): string {
   return items.map((r) => `- ${r}`).join("\n");
 }
 
+function conciseOutputInstruction(resumeChars: number): string {
+  if (resumeChars < 8_000) return "";
+  return `
+OUTPUT SIZE LIMIT
+The résumé is long. Keep candidate_evidence to one short sentence per requirement. Limit strengths and gaps_and_risks to the top 5 items each. Return complete valid JSON within the output token budget.`;
+}
+
 // Build a concise user prompt that avoids repeating job text when structured
 // requirements are already available.
 function buildCachedRequirementsPrompt(args: UserPromptArgs): string | null {
@@ -223,6 +230,7 @@ INSTRUCTIONS
 10. Quote or closely reference exact candidate evidence for every qualification.
 11. Keep evidence statements concise (1-2 sentences each).
 12. Return valid JSON only using the required response structure.
+${conciseOutputInstruction(args.resume_text.length)}
 
 Required JSON structure:
 ${RESPONSE_SCHEMA}`;
@@ -296,6 +304,7 @@ INSTRUCTIONS
 10. Quote or closely reference exact candidate evidence for every qualification.
 11. Keep evidence statements concise (1-2 sentences each).
 12. Return valid JSON only using the required response structure.
+${conciseOutputInstruction(args.resume_text.length)}
 
 Required JSON structure:
 ${RESPONSE_SCHEMA}`;
@@ -351,6 +360,7 @@ INSTRUCTIONS
 11. Quote or closely reference exact candidate evidence for every qualification.
 12. Keep evidence statements concise (1-2 sentences each).
 13. Return valid JSON only using the required response structure.
+${conciseOutputInstruction(args.resume_text.length)}
 
 Required JSON structure:
 ${RESPONSE_SCHEMA}`;
@@ -358,9 +368,19 @@ ${RESPONSE_SCHEMA}`;
 
 // Repair prompt used when the first response fails schema validation.
 // Keeps the repair focused: only the broken field + original materials summary.
-export function buildRepairPrompt(invalid: string, error: string): string {
+export function buildRepairPrompt(
+  invalid: string,
+  error: string,
+  opts?: { truncated?: boolean }
+): string {
+  const truncationNote = opts?.truncated
+    ? `
+Your previous response was CUT OFF because it exceeded the output token limit. Return a SHORTER complete JSON object.
+Use one short sentence per candidate_evidence. Limit strengths and gaps_and_risks to the top 5 items each.
+`
+    : "";
   return `Your previous response did not match the required JSON schema.
-
+${truncationNote}
 Validation issues:
 ${error}
 

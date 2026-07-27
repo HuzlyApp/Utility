@@ -3,7 +3,8 @@ import {
   buildUserPrompt,
   buildRepairPrompt,
 } from "@/lib/prompt";
-import { parseAiResult } from "@/lib/schema";
+import { parseAiResult, isLikelyTruncatedJsonError } from "@/lib/schema";
+import { getClaudeMaxTokensForAnalysis } from "@/lib/config";
 import { claudeProvider } from "./providers/claude";
 import { logAnalysisOperation } from "./log";
 import {
@@ -108,13 +109,20 @@ export async function analyzeCandidate(
   timer.start("claude_time_to_first_token");
   timer.start("claude_generation");
 
+  const maxTokens = getClaudeMaxTokensForAnalysis(args.resume_text.length);
+
   try {
     const firstResponse = await adapter.complete(baseMessages, {
       model,
       attemptNumber: 1,
       meta: analysisMeta,
+      maxTokens,
     });
     const firstRaw = firstResponse.content;
+    const firstTruncated =
+      firstResponse.stopReason === "max_tokens" ||
+      (firstResponse.tokenUsage?.completionTokens != null &&
+        firstResponse.tokenUsage.completionTokens >= maxTokens - 16);
 
     // Use provider-reported TTFB if available
     const ttfbMs =
@@ -175,12 +183,14 @@ export async function analyzeCandidate(
     });
 
     timer.start("repair_retry");
+    const truncated =
+      firstTruncated || isLikelyTruncatedJsonError(firstParsed.error);
     const repairMessages: ChatMessage[] = [
       ...baseMessages,
       { role: "assistant", content: firstRaw },
       {
         role: "user",
-        content: buildRepairPrompt(firstRaw, firstParsed.error),
+        content: buildRepairPrompt(firstRaw, firstParsed.error, { truncated }),
       },
     ];
 
@@ -188,6 +198,7 @@ export async function analyzeCandidate(
       model,
       attemptNumber: 2,
       meta: analysisMeta,
+      maxTokens,
     });
     const repairRaw = repairResponse.content;
 

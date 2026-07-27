@@ -20,6 +20,8 @@ vi.mock("@/lib/config", () => ({
     jobCacheTtlMs: 3600000,
     jobCacheMaxSize: 100,
   },
+  getClaudeMaxTokensForAnalysis: (resumeCharCount: number) =>
+    resumeCharCount > 10_000 ? 16384 : 4096,
 }));
 
 const claudeComplete = vi.fn();
