@@ -81,16 +81,19 @@ export async function listEntityFiles(
            extraction_method, extraction_quality, ocr_confidence, needs_review, created_at
     FROM entity_files
     WHERE entity_type = ${entityType} AND entity_id = ${entityId}
-      AND EXISTS (
-        SELECT 1 FROM candidates c
-        WHERE ${entityType} = 'candidate'
-          AND c.id = ${entityId}
-          AND c.tenant_id = ${tenantId}
-      OR EXISTS (
-        SELECT 1 FROM job_match_workspaces w
-        WHERE ${entityType} = 'job_workspace'
-          AND w.id = ${entityId}
-          AND w.tenant_id = ${tenantId}
+      AND (
+        EXISTS (
+          SELECT 1 FROM candidates c
+          WHERE ${entityType} = 'candidate'
+            AND c.id = ${entityId}
+            AND c.tenant_id = ${tenantId}
+        )
+        OR EXISTS (
+          SELECT 1 FROM job_match_workspaces w
+          WHERE ${entityType} = 'job_workspace'
+            AND w.id = ${entityId}
+            AND w.tenant_id = ${tenantId}
+        )
       )
     ORDER BY page_order ASC, created_at ASC
   `) as EntityFile[];

@@ -423,6 +423,7 @@ export async function listWorkspaceCandidates(
         WHERE r.analysis_id = a.id AND r.requirement_type = 'MANDATORY'
           AND r.requirement_outcome = 'NOT_MET') AS mandatory_not_met
     FROM job_match_candidates jmc
+    JOIN job_match_workspaces w ON w.id = jmc.workspace_id
     JOIN candidates c ON c.id = jmc.candidate_id
     LEFT JOIN candidate_match_analyses a ON a.id = jmc.latest_analysis_id
     LEFT JOIN LATERAL (
@@ -431,8 +432,8 @@ export async function listWorkspaceCandidates(
       ORDER BY created_at DESC LIMIT 1
     ) d ON true
     WHERE jmc.workspace_id = ${workspaceId}
-      AND w.id = ${workspaceId}
       AND w.tenant_id = ${tenantId}
+      AND c.tenant_id = ${tenantId}
     ORDER BY a.overall_match_score DESC NULLS LAST, c.full_name ASC
   `) as Array<Record<string, unknown>>;
 
