@@ -3,9 +3,16 @@ import "./globals.css";
 import { ToastProvider } from "@/components/ui/toast";
 
 export const metadata: Metadata = {
-  title: "Recruiter Toolkit — Candidate Match Dashboard",
+  title: "BrassHR — HR simplified",
   description:
-    "Persistent recruiter dashboard for healthcare staffing: manage jobs, candidates, and AI-assisted match assessments.",
+    "BrassHR recruiting dashboard for managing jobs, candidates, and AI-assisted match assessments.",
+  icons: {
+    icon: [
+      { url: "/favicon.ico" },
+      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+    ],
+  },
 };
 
 export default function RootLayout({

@@ -16,7 +16,7 @@ export default async function ChangePasswordPage() {
           <p className="mt-1 text-sm text-slate-500">
             {user.mustChangePassword
               ? "For security, please choose a new password before continuing."
-              : "Update the password for your Recruiter Toolkit account."}
+              : "Update the password for your BrassHR account."}
           </p>
         </div>
         <ChangePasswordForm mustChange={user.mustChangePassword} email={user.email} />

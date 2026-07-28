@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Image from "next/image";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getPostLoginRedirect } from "@/lib/auth/return-to";
 import { LoginForm } from "./login-form";
@@ -19,13 +20,20 @@ export default async function LoginPage({
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12">
       <div className="w-full max-w-md">
         <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
-            RT
+          <div className="flex h-10 items-center">
+            <Image
+              src="/brasshr-logo.png"
+              alt="BrassHR logo"
+              width={160}
+              height={82}
+              className="h-10 w-auto"
+              priority
+            />
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-slate-900">Recruiter Toolkit</h1>
+            <h1 className="text-lg font-semibold text-navy-600">BrassHR</h1>
             <p className="text-sm text-slate-500">
-              Sign in to manage jobs, candidates, and match assessments.
+              HR simplified.
             </p>
           </div>
         </div>

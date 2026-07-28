@@ -3,13 +3,13 @@
 @tailwind utilities;
 
 :root {
-  /* Neutral SaaS palette + brand tokens (8px spacing scale via Tailwind). */
-  --background: #f6f7f9;
+  /* BrassHR palette + app tokens (8px spacing scale via Tailwind). */
+  --background: #f8fafc;
   --surface: #ffffff;
-  --foreground: #0f172a;
+  --foreground: #012352;
   --muted: #64748b;
   --border: #e2e8f0;
-  --ring: #2563eb;
+  --ring: #bc8b41;
   --radius: 0.75rem;
 }
 

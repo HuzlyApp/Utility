@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/primitives";
@@ -52,12 +53,19 @@ export function AppHeader({
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
         <div className="flex items-center gap-6">
           <Link href="/dashboard" className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
-              RT
+            <div className="flex h-9 items-center">
+              <Image
+                src="/brasshr-logo.png"
+                alt="BrassHR logo"
+                width={160}
+                height={82}
+                className="h-9 w-auto"
+                priority
+              />
             </div>
             <div className="leading-tight">
-              <p className="text-sm font-semibold text-slate-900">Recruiter Toolkit</p>
-              <p className="text-xs text-slate-500">Candidate Match Dashboard</p>
+              <p className="text-sm font-semibold text-navy-600">BrassHR</p>
+              <p className="text-xs text-slate-500">HR simplified</p>
             </div>
           </Link>
           <nav className="hidden items-center gap-1 sm:flex">
