@@ -87,6 +87,7 @@ export default async function CandidateDetailPage({
                 validated_result: analysis.validated_result,
                 score_adjustments: analysis.score_adjustments,
                 created_at: analysis.created_at,
+                resume_version: analysis.resume_version,
                 ai_provider: analysis.ai_provider,
                 ai_model: analysis.ai_model,
                 model_name: analysis.model_name,
@@ -97,6 +98,7 @@ export default async function CandidateDetailPage({
         disposition={disposition?.disposition ?? null}
         dispositionNotes={disposition?.notes ?? null}
         history={history}
+        pipelineStatus={jmc?.status ?? null}
       />
     </div>
   );

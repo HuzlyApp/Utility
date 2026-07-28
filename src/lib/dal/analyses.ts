@@ -130,10 +130,261 @@ export async function saveCandidateAnalysis(
   return analysisId;
 }
 
+export interface ReplaceAnalysisResumeParams {
+  user: AppUser;
+  analysisId: string;
+  workspaceId: string;
+  candidateId: string;
+  jobMatchCandidateId: string;
+  existingCandidateName: string | null;
+  detectedCandidateName: string | null;
+  candidateNameDecision: "KEEP_EXISTING" | "REPLACE_WITH_DETECTED";
+  resumeFilename: string;
+  resumeFileHash: string | null;
+  resumeText: string;
+  extractedQuality: string;
+  ocrConfidence: number | null;
+  extractionMethod: string;
+  isImage: boolean;
+  fileType: string;
+  mimeType: string;
+  fileBytes: Buffer;
+  validated: AiResult;
+  aiRaw: unknown;
+  scoreAdjustments: string[];
+  model: string;
+  provider: AiProvider;
+}
+
+export async function replaceAnalysisWithUpdatedResume(
+  params: ReplaceAnalysisResumeParams
+): Promise<{ resumeVersion: number }> {
+  const sql = getSql();
+  const cm = params.validated.candidate_match;
+  const nextCandidateName =
+    params.candidateNameDecision === "REPLACE_WITH_DETECTED" &&
+    params.detectedCandidateName
+      ? params.detectedCandidateName
+      : params.existingCandidateName;
+  const normalizedNextName = nextCandidateName
+    ? normalizeCandidateName(nextCandidateName) || null
+    : null;
+  const fileB64 = params.fileBytes.toString("base64");
+  const requirements = [
+    ...params.validated.mandatory_requirements,
+    ...params.validated.preferred_requirements,
+  ].map((r) => ({
+    requirement_text: r.requirement,
+    requirement_type: r.requirement_type,
+    evidence_status: r.status,
+    requirement_outcome: r.requirement_outcome,
+    candidate_evidence: r.candidate_evidence,
+    evidence_source: r.evidence_source,
+    impact: r.impact,
+    verification_required: r.verification_required,
+    confidence: r.confidence,
+  }));
+
+  const txResults = (await sql.transaction((tx) => [
+    tx`
+      WITH existing AS (
+        SELECT *
+        FROM candidate_match_analyses
+        WHERE id = ${params.analysisId}
+          AND owner_user_id = ${params.user.id}
+          AND tenant_id = ${params.user.tenantId}
+      ),
+      next_version AS (
+        SELECT COALESCE(MAX(version_number), 0) + 1 AS version_number
+        FROM candidate_match_analysis_versions
+        WHERE analysis_id = ${params.analysisId}
+      ),
+      inserted_version AS (
+        INSERT INTO candidate_match_analysis_versions (
+          analysis_id, version_number, resume_filename, resume_file_url, resume_file_hash, resume_text,
+          ai_raw_response_json, validated_result_json, overall_match_score, match_category,
+          recommended_action, submission_readiness, confidence_score, model_name, change_reason, created_by
+        )
+        SELECT
+          e.id,
+          nv.version_number,
+          e.resume_filename,
+          COALESCE(e.resume_filename, ''),
+          e.resume_file_hash,
+          e.resume_text,
+          e.ai_raw_response_json,
+          e.validated_result_json,
+          e.overall_match_score,
+          e.match_category,
+          e.recommended_action,
+          e.submission_readiness,
+          e.confidence_score,
+          COALESCE(e.ai_model, e.model_name),
+          'Resume replaced and analysis rerun',
+          ${params.user.id}
+        FROM existing e
+        CROSS JOIN next_version nv
+        RETURNING version_number
+      ),
+      archive_requirements AS (
+        INSERT INTO candidate_match_requirement_versions (
+          analysis_id, version_number, requirement_text, requirement_type,
+          evidence_status, requirement_outcome, candidate_evidence, evidence_source,
+          impact, verification_required, confidence
+        )
+        SELECT
+          r.analysis_id,
+          (SELECT version_number FROM inserted_version),
+          r.requirement_text,
+          r.requirement_type,
+          r.evidence_status,
+          r.requirement_outcome,
+          r.candidate_evidence,
+          r.evidence_source,
+          r.impact,
+          r.verification_required,
+          r.confidence
+        FROM candidate_match_requirements r
+        WHERE r.analysis_id = ${params.analysisId}
+      ),
+      update_candidate AS (
+        UPDATE candidates
+        SET
+          full_name = ${nextCandidateName},
+          normalized_full_name = ${normalizedNextName},
+          extracted_resume_text = ${params.resumeText},
+          extraction_quality = ${params.extractedQuality},
+          ocr_confidence = ${params.ocrConfidence},
+          updated_at = now()
+        WHERE id = ${params.candidateId}
+          AND owner_user_id = ${params.user.id}
+          AND tenant_id = ${params.user.tenantId}
+        RETURNING id
+      ),
+      update_analysis AS (
+        UPDATE candidate_match_analyses
+        SET
+          resume_text = ${params.resumeText},
+          ai_raw_response_json = ${JSON.stringify(params.aiRaw)},
+          validated_result_json = ${JSON.stringify(params.validated)},
+          score_adjustments_json = ${JSON.stringify(params.scoreAdjustments)},
+          overall_match_score = ${cm.recommended_overall_match_score},
+          match_category = ${cm.match_category},
+          recommended_action = ${cm.recommended_action},
+          submission_readiness = ${params.validated.submission_readiness.readiness_status},
+          confidence_score = ${cm.confidence_score},
+          model_name = ${params.model},
+          ai_provider = ${params.provider},
+          ai_model = ${params.model},
+          analysis_status = 'completed',
+          analysis_error = NULL,
+          analyzed_at = now(),
+          candidate_name = ${nextCandidateName},
+          normalized_candidate_name = ${normalizedNextName},
+          resume_version = COALESCE(resume_version, 1) + 1,
+          resume_updated_at = now(),
+          resume_updated_by = ${params.user.id},
+          resume_filename = ${params.resumeFilename},
+          resume_file_hash = ${params.resumeFileHash},
+          updated_at = now()
+        WHERE id = ${params.analysisId}
+          AND owner_user_id = ${params.user.id}
+          AND tenant_id = ${params.user.tenantId}
+        RETURNING resume_version
+      ),
+      replace_requirements AS (
+        DELETE FROM candidate_match_requirements
+        WHERE analysis_id = ${params.analysisId}
+      ),
+      insert_requirements AS (
+        INSERT INTO candidate_match_requirements (
+          analysis_id, requirement_text, requirement_type, evidence_status,
+          requirement_outcome, candidate_evidence, evidence_source, impact,
+          verification_required, confidence
+        )
+        SELECT
+          ${params.analysisId},
+          x.requirement_text,
+          x.requirement_type,
+          x.evidence_status,
+          x.requirement_outcome,
+          x.candidate_evidence,
+          x.evidence_source,
+          x.impact,
+          x.verification_required,
+          x.confidence
+        FROM jsonb_to_recordset(${JSON.stringify(requirements)}::jsonb) AS x(
+          requirement_text text,
+          requirement_type text,
+          evidence_status text,
+          requirement_outcome text,
+          candidate_evidence text,
+          evidence_source text,
+          impact text,
+          verification_required boolean,
+          confidence integer
+        )
+      ),
+      save_file AS (
+        INSERT INTO entity_files (
+          entity_type, entity_id, owner_user_id, file_name, file_type, mime_type,
+          byte_size, is_image, page_order, extracted_text, extraction_method,
+          extraction_quality, ocr_confidence, needs_review, created_by, file_bytes, storage_path
+        ) VALUES (
+          'candidate', ${params.candidateId}, ${params.user.id}, ${params.resumeFilename},
+          ${params.fileType}, ${params.mimeType}, ${params.fileBytes.length}, ${params.isImage}, 0,
+          ${params.resumeText}, ${params.extractionMethod}, ${params.extractedQuality}, ${params.ocrConfidence},
+          false, ${params.user.id}, decode(${fileB64}, 'base64'), 'db://entity_files'
+        )
+      ),
+      update_status AS (
+        UPDATE job_match_candidates
+        SET status = 'ANALYZED', updated_at = now()
+        WHERE id = ${params.jobMatchCandidateId}
+          AND owner_user_id = ${params.user.id}
+      ),
+      audit_version AS (
+        INSERT INTO audit_logs (
+          actor_user_id, tenant_id, entity_type, entity_id, action, new_value_json
+        ) VALUES (
+          ${params.user.id},
+          ${params.user.tenantId},
+          'analysis',
+          ${params.analysisId},
+          'RESUME_VERSION_CREATED',
+          ${JSON.stringify({
+            analysisId: params.analysisId,
+            resumeFilename: params.resumeFilename,
+            oldScore: null,
+            newScore: cm.recommended_overall_match_score,
+          })}
+        )
+      )
+      SELECT resume_version FROM update_analysis
+    `,
+  ])) as Array<Array<{ resume_version: number }>>;
+
+  const resumeVersion = txResults[0]?.[0]?.resume_version;
+  if (!resumeVersion) {
+    throw new Error("Failed to update analysis with the new resume.");
+  }
+  return { resumeVersion };
+}
+
 export interface StoredAnalysis {
   id: string;
   workspace_id: string | null;
   candidate_id: string | null;
+  job_match_candidate_id: string | null;
+  resume_text: string | null;
+  job_description_text: string | null;
+  structured_job_fields_json: Record<string, unknown> | null;
+  recruiter_notes: string | null;
+  verified_recruiter_inputs_json: Record<string, unknown> | null;
+  ai_raw_response_json: unknown;
+  resume_version: number;
+  resume_file_hash: string | null;
+  resume_filename: string | null;
   validated_result: AiResult;
   score_adjustments: string[];
   created_at: string;
@@ -150,8 +401,11 @@ export async function getAnalysis(
 ): Promise<StoredAnalysis | null> {
   const sql = getSql();
   const rows = (await sql`
-    SELECT id, workspace_id, candidate_id, validated_result_json,
-           score_adjustments_json, created_at, model_name,
+    SELECT id, workspace_id, candidate_id, job_match_candidate_id,
+           resume_text, job_description_text, structured_job_fields_json,
+           recruiter_notes, verified_recruiter_inputs_json, ai_raw_response_json,
+           resume_version, resume_file_hash, resume_filename,
+           validated_result_json, score_adjustments_json, created_at, model_name,
            ai_provider, ai_model, analysis_status, analyzed_at
     FROM candidate_match_analyses
     WHERE id = ${id}
@@ -164,6 +418,18 @@ export async function getAnalysis(
     id: row.id as string,
     workspace_id: (row.workspace_id as string) ?? null,
     candidate_id: (row.candidate_id as string) ?? null,
+    job_match_candidate_id: (row.job_match_candidate_id as string) ?? null,
+    resume_text: (row.resume_text as string) ?? null,
+    job_description_text: (row.job_description_text as string) ?? null,
+    structured_job_fields_json:
+      (row.structured_job_fields_json as Record<string, unknown>) ?? null,
+    recruiter_notes: (row.recruiter_notes as string) ?? null,
+    verified_recruiter_inputs_json:
+      (row.verified_recruiter_inputs_json as Record<string, unknown>) ?? null,
+    ai_raw_response_json: row.ai_raw_response_json,
+    resume_version: Number(row.resume_version ?? 1),
+    resume_file_hash: (row.resume_file_hash as string) ?? null,
+    resume_filename: (row.resume_filename as string) ?? null,
     validated_result: row.validated_result_json as AiResult,
     score_adjustments: (row.score_adjustments_json as string[]) ?? [],
     created_at: String(row.created_at),
@@ -194,12 +460,39 @@ export async function listCandidateAnalyses(
 ): Promise<AnalysisHistoryItem[]> {
   const sql = getSql();
   const rows = (await sql`
-    SELECT id, overall_match_score, match_category, submission_readiness,
-           model_name, ai_provider, ai_model, created_at
-    FROM candidate_match_analyses
-    WHERE candidate_id = ${candidateId}
-      AND owner_user_id = ${user.id}
-      AND tenant_id = ${user.tenantId}
+    SELECT *
+    FROM (
+      SELECT
+        a.id::text AS id,
+        a.overall_match_score,
+        a.match_category,
+        a.submission_readiness,
+        a.model_name,
+        a.ai_provider,
+        a.ai_model,
+        a.created_at
+      FROM candidate_match_analyses a
+      WHERE a.candidate_id = ${candidateId}
+        AND a.owner_user_id = ${user.id}
+        AND a.tenant_id = ${user.tenantId}
+
+      UNION ALL
+
+      SELECT
+        ('version:' || v.id::text) AS id,
+        v.overall_match_score,
+        v.match_category,
+        v.submission_readiness,
+        v.model_name,
+        NULL::text AS ai_provider,
+        v.model_name AS ai_model,
+        v.created_at
+      FROM candidate_match_analysis_versions v
+      JOIN candidate_match_analyses a ON a.id = v.analysis_id
+      WHERE a.candidate_id = ${candidateId}
+        AND a.owner_user_id = ${user.id}
+        AND a.tenant_id = ${user.tenantId}
+    ) history
     ORDER BY created_at DESC
   `) as AnalysisHistoryItem[];
   return rows;

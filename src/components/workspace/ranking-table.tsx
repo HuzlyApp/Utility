@@ -68,6 +68,16 @@ function statusTone(status: string): "green" | "amber" | "blue" | "red" | "slate
   if (status === "ANALYZED") return "green";
   if (status === "READY") return "blue";
   if (status === "ANALYZING") return "blue";
+  if (
+    status === "UPDATE_PENDING" ||
+    status === "EXTRACTING_UPDATED_RESUME" ||
+    status === "REANALYZING" ||
+    status === "VALIDATING" ||
+    status === "SAVING"
+  ) {
+    return "blue";
+  }
+  if (status === "UPDATE_FAILED") return "red";
   if (status === "NEEDS_REVIEW") return "amber";
   if (status === "FAILED") return "red";
   return "slate";

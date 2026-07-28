@@ -44,6 +44,8 @@ import {
 import type { DuplicateConfirmationRequired } from "@/lib/duplicate-candidate/messages";
 import { DuplicateWarningDialog } from "@/components/workspace/duplicate-warning-dialog";
 import { notifyWorkspaceCandidatesChanged } from "@/lib/workspace-events";
+import { UpdateResumeDialog } from "@/components/candidate/update-resume-dialog";
+import { updateResumeAndReanalyze, ResumeUpdateError } from "@/lib/client/update-resume";
 
 interface CandidateProps {
   id: string;
@@ -64,6 +66,7 @@ interface AnalysisProps {
   validated_result: AiResult;
   score_adjustments: string[];
   created_at: string;
+  resume_version?: number;
   ai_provider?: string | null;
   ai_model?: string | null;
   model_name?: string | null;
@@ -104,6 +107,7 @@ export function CandidateDetail({
     ai_model?: string | null;
     model_name?: string | null;
   }[];
+  pipelineStatus?: string | null;
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -128,6 +132,14 @@ export function CandidateDetail({
   const [duplicateDialog, setDuplicateDialog] = useState<DuplicateConfirmationRequired | null>(
     null
   );
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [updatingResume, setUpdatingResume] = useState(false);
+  const [nameMismatch, setNameMismatch] = useState<{
+    detectedName: string;
+    existingName: string;
+  } | null>(null);
+  const [nameDecision, setNameDecision] = useState<"keep" | "replace">("keep");
   const duplicateResolverRef = React.useRef<((continued: boolean) => void) | null>(null);
 
   // Reconcile local form state when the server props refresh after save/reanalyze.
@@ -264,6 +276,45 @@ export function CandidateDetail({
     }
   }
 
+  async function runResumeUpdate(continueMismatch = false) {
+    if (!analysis?.id || !resumeFile) return;
+    setUpdatingResume(true);
+    try {
+      await updateResumeAndReanalyze({
+        analysisId: analysis.id,
+        file: resumeFile,
+        modelOptionId: optionId,
+        continueNameMismatch: continueMismatch,
+        candidateNameDecision: nameDecision,
+      });
+      setUpdateDialogOpen(false);
+      setResumeFile(null);
+      setNameMismatch(null);
+      toast("Resume updated and analysis rerun.", "success");
+      if (workspaceId) notifyWorkspaceCandidatesChanged(workspaceId);
+      router.refresh();
+    } catch (err) {
+      if (
+        err instanceof ResumeUpdateError &&
+        err.code === "RESUME_NAME_MISMATCH" &&
+        err.detectedName &&
+        err.existingName
+      ) {
+        setNameMismatch({
+          detectedName: err.detectedName,
+          existingName: err.existingName,
+        });
+        toast("Name mismatch detected. Confirm to continue.", "error");
+        return;
+      }
+      const message =
+        err instanceof ResumeUpdateError ? err.message : "Could not update resume.";
+      toast(message, "error");
+    } finally {
+      setUpdatingResume(false);
+    }
+  }
+
   function handleDuplicateContinue() {
     duplicateResolverRef.current?.(true);
   }
@@ -367,6 +418,10 @@ export function CandidateDetail({
                   <Badge tone="blue">{DISPLAY_CATEGORY[cm.match_category as MatchCategory]}</Badge>
                   <Badge tone="slate">Confidence {cm.confidence_score}%</Badge>
                   <Badge tone="slate">{DISPLAY_ACTION[cm.recommended_action]}</Badge>
+                  {updatingResume && <Badge tone="amber">Updating resume</Badge>}
+                  {analysis?.resume_version ? (
+                    <Badge tone="slate">Version {analysis.resume_version}</Badge>
+                  ) : null}
                   <ModelBadge
                     provider={analysis?.ai_provider}
                     model={analysis?.ai_model ?? analysis?.model_name}
@@ -636,6 +691,19 @@ export function CandidateDetail({
 
         {workspaceId && (
           <div className="flex flex-wrap gap-2">
+            {analysis?.id && (
+              <button
+                onClick={() => {
+                  setUpdateDialogOpen(true);
+                  setNameMismatch(null);
+                  setNameDecision("keep");
+                }}
+                disabled={updatingResume || reanalyzing}
+                className="rounded-lg border border-brand-300 px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Update Resume
+              </button>
+            )}
             <a
               href={`/api/workspaces/${workspaceId}/report`}
               className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -662,6 +730,27 @@ export function CandidateDetail({
           onCancel={handleDuplicateCancel}
         />
       )}
+
+      <UpdateResumeDialog
+        candidateName={candidate.full_name || "candidate"}
+        open={updateDialogOpen}
+        pending={updatingResume}
+        selectedFileName={resumeFile?.name ?? null}
+        mismatch={nameMismatch}
+        nameDecision={nameDecision}
+        onClose={() => {
+          setUpdateDialogOpen(false);
+          setResumeFile(null);
+          setNameMismatch(null);
+        }}
+        onPickFile={(file) => {
+          setResumeFile(file);
+          setNameMismatch(null);
+        }}
+        onSubmit={() => runResumeUpdate(false)}
+        onContinueMismatch={() => runResumeUpdate(true)}
+        onNameDecision={setNameDecision}
+      />
     </div>
   );
 }

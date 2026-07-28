@@ -7,6 +7,12 @@ export type JobStatus = "OPEN" | "ON_HOLD" | "FILLED" | "CLOSED";
 export type CandidatePipelineStatus =
   | "QUEUED"
   | "UPLOADING"
+  | "UPDATE_PENDING"
+  | "EXTRACTING_UPDATED_RESUME"
+  | "REANALYZING"
+  | "VALIDATING"
+  | "SAVING"
+  | "UPDATE_FAILED"
   | "EXTRACTING"
   | "OCR_PROCESSING"
   | "READY"
