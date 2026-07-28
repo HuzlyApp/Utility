@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { ok, fail } from "@/lib/http";
-import { withUser } from "@/lib/api-helpers";
+import { withTenantUser } from "@/lib/api-helpers";
 import { requireUser, AuthError } from "@/lib/auth/session";
 import {
   getFileForDownload,
@@ -42,7 +42,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { fileId: string } }
 ) {
-  return withUser("files.update", async (user) => {
+  return withTenantUser("files.update", async (user) => {
     const body = (await req.json()) as { extracted_text?: string; page_order?: number };
     if (typeof body.page_order === "number") {
       const okReorder = await reorderFile(user, params.fileId, body.page_order);
@@ -60,7 +60,7 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: { fileId: string } }
 ) {
-  return withUser("files.delete", async (user) => {
+  return withTenantUser("files.delete", async (user) => {
     const deleted = await deleteEntityFile(user, params.fileId);
     if (!deleted) return fail("File not found.", 404, "NOT_FOUND");
     return ok({});

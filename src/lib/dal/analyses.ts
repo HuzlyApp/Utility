@@ -1,11 +1,16 @@
 import "server-only";
 import { getSql } from "./client";
 import { audit } from "./audit";
-import type { AppUser } from "@/lib/auth/session";
+import { AuthError, type AppUser } from "@/lib/auth/session";
 import type { AiResult } from "@/lib/schema";
 import type { AnalyzeRequestBody } from "@/lib/types";
 import type { AiProvider } from "@/lib/ai";
 import { normalizeCandidateName } from "@/lib/duplicate-candidate/normalize";
+
+function tenantIdOf(user: AppUser): string {
+  if (!user.tenantId) throw new AuthError("Tenant context is required.", 403);
+  return user.tenantId;
+}
 
 export interface SaveAnalysisParams {
   user: AppUser;
@@ -31,6 +36,7 @@ export async function saveCandidateAnalysis(
 ): Promise<string> {
   const sql = getSql();
   const { user, validated } = params;
+  const tenantId = tenantIdOf(user);
   const cm = validated.candidate_match;
   const provider = params.provider ?? "claude";
   const status = params.analysisStatus ?? "completed";
@@ -57,7 +63,7 @@ export async function saveCandidateAnalysis(
       candidate_name, normalized_candidate_name,
       duplicate_warning_acknowledged, duplicate_confidence
     ) VALUES (
-      ${user.tenantId}, ${user.id}, ${user.id}, ${user.id},
+      ${tenantId}, ${user.id}, ${user.id}, ${user.id},
       ${params.workspaceId}, ${params.candidateId}, ${params.jobMatchCandidateId},
       ${params.input.job_id ?? null}, ${params.input.job_title ?? null}, ${params.input.msp_name ?? null},
       ${params.input.job_description_text}, ${JSON.stringify(params.input.structured_job_fields ?? {})},
@@ -98,7 +104,7 @@ export async function saveCandidateAnalysis(
 
   await audit({
     actorUserId: user.id,
-    tenantId: user.tenantId,
+    tenantId,
     entityType: "analysis",
     entityId: analysisId,
     action: "ANALYSIS_CREATED",
@@ -115,7 +121,7 @@ export async function saveCandidateAnalysis(
   if (params.duplicateWarningAcknowledged) {
     await audit({
       actorUserId: user.id,
-      tenantId: user.tenantId,
+      tenantId,
       entityType: "analysis",
       entityId: analysisId,
       action: "DUPLICATE_WARNING_OVERRIDDEN",
@@ -160,6 +166,7 @@ export async function replaceAnalysisWithUpdatedResume(
   params: ReplaceAnalysisResumeParams
 ): Promise<{ resumeVersion: number }> {
   const sql = getSql();
+  const tenantId = tenantIdOf(params.user);
   const cm = params.validated.candidate_match;
   const nextCandidateName =
     params.candidateNameDecision === "REPLACE_WITH_DETECTED" &&
@@ -191,8 +198,7 @@ export async function replaceAnalysisWithUpdatedResume(
         SELECT *
         FROM candidate_match_analyses
         WHERE id = ${params.analysisId}
-          AND owner_user_id = ${params.user.id}
-          AND tenant_id = ${params.user.tenantId}
+          AND tenant_id = ${tenantId}
       ),
       next_version AS (
         SELECT COALESCE(MAX(version_number), 0) + 1 AS version_number
@@ -257,8 +263,7 @@ export async function replaceAnalysisWithUpdatedResume(
           ocr_confidence = ${params.ocrConfidence},
           updated_at = now()
         WHERE id = ${params.candidateId}
-          AND owner_user_id = ${params.user.id}
-          AND tenant_id = ${params.user.tenantId}
+          AND tenant_id = ${tenantId}
         RETURNING id
       ),
       update_analysis AS (
@@ -288,8 +293,7 @@ export async function replaceAnalysisWithUpdatedResume(
           resume_file_hash = ${params.resumeFileHash},
           updated_at = now()
         WHERE id = ${params.analysisId}
-          AND owner_user_id = ${params.user.id}
-          AND tenant_id = ${params.user.tenantId}
+          AND tenant_id = ${tenantId}
         RETURNING resume_version
       ),
       replace_requirements AS (
@@ -341,14 +345,16 @@ export async function replaceAnalysisWithUpdatedResume(
         UPDATE job_match_candidates
         SET status = 'ANALYZED', updated_at = now()
         WHERE id = ${params.jobMatchCandidateId}
-          AND owner_user_id = ${params.user.id}
+          AND workspace_id IN (
+            SELECT id FROM job_match_workspaces WHERE tenant_id = ${tenantId}
+          )
       ),
       audit_version AS (
         INSERT INTO audit_logs (
           actor_user_id, tenant_id, entity_type, entity_id, action, new_value_json
         ) VALUES (
           ${params.user.id},
-          ${params.user.tenantId},
+          ${tenantId},
           'analysis',
           ${params.analysisId},
           'RESUME_VERSION_CREATED',
@@ -400,6 +406,7 @@ export async function getAnalysis(
   id: string
 ): Promise<StoredAnalysis | null> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     SELECT id, workspace_id, candidate_id, job_match_candidate_id,
            resume_text, job_description_text, structured_job_fields_json,
@@ -409,8 +416,7 @@ export async function getAnalysis(
            ai_provider, ai_model, analysis_status, analyzed_at
     FROM candidate_match_analyses
     WHERE id = ${id}
-      AND owner_user_id = ${user.id}
-      AND tenant_id = ${user.tenantId}
+      AND tenant_id = ${tenantId}
   `) as Array<Record<string, unknown>>;
   const row = rows[0];
   if (!row) return null;
@@ -459,6 +465,7 @@ export async function listCandidateAnalyses(
   candidateId: string
 ): Promise<AnalysisHistoryItem[]> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     SELECT *
     FROM (
@@ -473,8 +480,7 @@ export async function listCandidateAnalyses(
         a.created_at
       FROM candidate_match_analyses a
       WHERE a.candidate_id = ${candidateId}
-        AND a.owner_user_id = ${user.id}
-        AND a.tenant_id = ${user.tenantId}
+        AND a.tenant_id = ${tenantId}
 
       UNION ALL
 
@@ -490,8 +496,7 @@ export async function listCandidateAnalyses(
       FROM candidate_match_analysis_versions v
       JOIN candidate_match_analyses a ON a.id = v.analysis_id
       WHERE a.candidate_id = ${candidateId}
-        AND a.owner_user_id = ${user.id}
-        AND a.tenant_id = ${user.tenantId}
+        AND a.tenant_id = ${tenantId}
     ) history
     ORDER BY created_at DESC
   `) as AnalysisHistoryItem[];

@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { withUser } from "@/lib/api-helpers";
+import { withTenantUser } from "@/lib/api-helpers";
 import { fail, ok, logServerError } from "@/lib/http";
 import { getAnalysis, replaceAnalysisWithUpdatedResume } from "@/lib/dal/analyses";
 import { getWorkspace } from "@/lib/dal/workspaces";
@@ -30,7 +30,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { analysisId: string } }
 ) {
-  return withUser("candidate-match.update-resume", async (user) => {
+  return withTenantUser("candidate-match.update-resume", async (user) => {
     const analysis = await getAnalysis(user, params.analysisId);
     if (!analysis || !analysis.workspace_id || !analysis.candidate_id || !analysis.job_match_candidate_id) {
       return fail("Analysis not found.", 404, "NOT_FOUND");

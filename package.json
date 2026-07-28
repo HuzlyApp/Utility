@@ -10,7 +10,8 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:init": "node --loader ts-node/esm scripts/init-db.ts"
+    "db:init": "node --loader ts-node/esm scripts/init-db.ts",
+    "seed:superadmin": "node scripts/seed-superadmin.mjs"
   },
   "dependencies": {
     "@babel/runtime": "^7.29.7",

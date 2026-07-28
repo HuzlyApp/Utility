@@ -4,6 +4,7 @@ import { audit } from "./audit";
 import type { AppUser } from "@/lib/auth/session";
 import type { StructuredJobFields } from "@/lib/types";
 import type { JobStatus, Workspace, WorkspaceSummary } from "./types";
+import { AuthError } from "@/lib/auth/session";
 
 export interface WorkspaceInput {
   job_ref?: string;
@@ -22,18 +23,24 @@ export interface WorkspaceInput {
 
 const n = (v: unknown) => Number(v ?? 0);
 
+function tenantIdOf(user: AppUser): string {
+  if (!user.tenantId) throw new AuthError("Tenant context is required.", 403);
+  return user.tenantId;
+}
+
 export async function createWorkspace(
   user: AppUser,
   input: WorkspaceInput
 ): Promise<string> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     INSERT INTO job_match_workspaces (
       owner_user_id, tenant_id, job_ref, job_title, msp_or_client, specialty,
       department, location, shift, start_date, job_status,
       structured_requirements, job_description_text, job_description_quality
     ) VALUES (
-      ${user.id}, ${user.tenantId}, ${input.job_ref ?? null}, ${input.job_title ?? null},
+      ${user.id}, ${tenantId}, ${input.job_ref ?? null}, ${input.job_title ?? null},
       ${input.msp_or_client ?? null}, ${input.specialty ?? null}, ${input.department ?? null},
       ${input.location ?? null}, ${input.shift ?? null}, ${input.start_date ?? null},
       ${input.job_status ?? "OPEN"},
@@ -44,7 +51,7 @@ export async function createWorkspace(
   const id = rows[0].id;
   await audit({
     actorUserId: user.id,
-    tenantId: user.tenantId,
+    tenantId,
     entityType: "job_workspace",
     entityId: id,
     action: "WORKSPACE_CREATED",
@@ -58,9 +65,10 @@ export async function getWorkspace(
   id: string
 ): Promise<Workspace | null> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     SELECT * FROM job_match_workspaces
-    WHERE id = ${id} AND owner_user_id = ${user.id}
+    WHERE id = ${id} AND tenant_id = ${tenantId}
   `) as Workspace[];
   return rows[0] ?? null;
 }
@@ -70,6 +78,7 @@ export async function listWorkspaces(
   opts?: { includeArchived?: boolean }
 ): Promise<WorkspaceSummary[]> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     SELECT w.*,
       COUNT(jmc.id) AS candidate_count,
@@ -79,7 +88,7 @@ export async function listWorkspaces(
     FROM job_match_workspaces w
     LEFT JOIN job_match_candidates jmc ON jmc.workspace_id = w.id
     LEFT JOIN candidate_match_analyses a ON a.id = jmc.latest_analysis_id
-    WHERE w.owner_user_id = ${user.id}
+    WHERE w.tenant_id = ${tenantId}
       AND (${opts?.includeArchived ?? false} OR w.workspace_status = 'ACTIVE')
     GROUP BY w.id
     ORDER BY w.updated_at DESC
@@ -102,6 +111,7 @@ export async function updateWorkspace(
   const existing = await getWorkspace(user, id);
   if (!existing) return false;
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   await sql`
     UPDATE job_match_workspaces SET
       job_ref = ${input.job_ref ?? existing.job_ref},
@@ -119,11 +129,11 @@ export async function updateWorkspace(
       job_description_text = ${input.job_description_text ?? existing.job_description_text},
       job_description_quality = ${input.job_description_quality ?? existing.job_description_quality},
       updated_at = now()
-    WHERE id = ${id} AND owner_user_id = ${user.id}
+    WHERE id = ${id} AND tenant_id = ${tenantId}
   `;
   await audit({
     actorUserId: user.id,
-    tenantId: user.tenantId,
+    tenantId,
     entityType: "job_workspace",
     entityId: id,
     action: "WORKSPACE_UPDATED",
@@ -139,13 +149,14 @@ export async function setWorkspaceStatus(
   const existing = await getWorkspace(user, id);
   if (!existing) return false;
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   await sql`
     UPDATE job_match_workspaces SET workspace_status = ${status}, updated_at = now()
-    WHERE id = ${id} AND owner_user_id = ${user.id}
+    WHERE id = ${id} AND tenant_id = ${tenantId}
   `;
   await audit({
     actorUserId: user.id,
-    tenantId: user.tenantId,
+    tenantId,
     entityType: "job_workspace",
     entityId: id,
     action: status === "ARCHIVED" ? "WORKSPACE_ARCHIVED" : "WORKSPACE_RESTORED",
@@ -172,10 +183,13 @@ export async function deleteWorkspace(
   }
 
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
 
   const linked = (await sql`
     SELECT candidate_id FROM job_match_candidates
-    WHERE workspace_id = ${id} AND owner_user_id = ${user.id}
+    WHERE workspace_id = ${id} AND owner_user_id IN (
+      SELECT user_id FROM user_profiles WHERE tenant_id = ${tenantId}
+    )
   `) as { candidate_id: string }[];
   const candidateIds = linked.map((r) => r.candidate_id);
 
@@ -184,7 +198,7 @@ export async function deleteWorkspace(
         SELECT jmc.candidate_id
         FROM job_match_candidates jmc
         WHERE jmc.workspace_id = ${id}
-          AND jmc.owner_user_id = ${user.id}
+          AND jmc.workspace_id = ${id}
           AND NOT EXISTS (
             SELECT 1 FROM job_match_candidates other
             WHERE other.candidate_id = jmc.candidate_id
@@ -200,17 +214,17 @@ export async function deleteWorkspace(
   await sql`
     UPDATE job_match_candidates
     SET latest_analysis_id = NULL, updated_at = now()
-    WHERE workspace_id = ${id} AND owner_user_id = ${user.id}
+    WHERE workspace_id = ${id}
   `;
 
   await sql`
     DELETE FROM candidate_match_analyses
-    WHERE workspace_id = ${id} AND owner_user_id = ${user.id}
+    WHERE workspace_id = ${id} AND tenant_id = ${tenantId}
   `;
 
   await sql`
     DELETE FROM entity_files
-    WHERE owner_user_id = ${user.id}
+    WHERE owner_user_id IN (SELECT user_id FROM user_profiles WHERE tenant_id = ${tenantId})
       AND entity_type = 'job_workspace'
       AND entity_id = ${id}
   `;
@@ -218,13 +232,12 @@ export async function deleteWorkspace(
   if (exclusiveIds.length > 0) {
     await sql`
       DELETE FROM entity_files
-      WHERE owner_user_id = ${user.id}
+      WHERE owner_user_id IN (SELECT user_id FROM user_profiles WHERE tenant_id = ${tenantId})
         AND entity_type = 'candidate'
         AND entity_id IN (
           SELECT jmc.candidate_id
           FROM job_match_candidates jmc
           WHERE jmc.workspace_id = ${id}
-            AND jmc.owner_user_id = ${user.id}
             AND NOT EXISTS (
               SELECT 1 FROM job_match_candidates other
               WHERE other.candidate_id = jmc.candidate_id
@@ -234,12 +247,11 @@ export async function deleteWorkspace(
     `;
     await sql`
       DELETE FROM candidates
-      WHERE owner_user_id = ${user.id}
+      WHERE tenant_id = ${tenantId}
         AND id IN (
           SELECT jmc.candidate_id
           FROM job_match_candidates jmc
           WHERE jmc.workspace_id = ${id}
-            AND jmc.owner_user_id = ${user.id}
             AND NOT EXISTS (
               SELECT 1 FROM job_match_candidates other
               WHERE other.candidate_id = jmc.candidate_id
@@ -252,7 +264,7 @@ export async function deleteWorkspace(
   // Remaining shared links + screening/dispositions cascade from workspace delete.
   const removed = (await sql`
     DELETE FROM job_match_workspaces
-    WHERE id = ${id} AND owner_user_id = ${user.id}
+    WHERE id = ${id} AND tenant_id = ${tenantId}
     RETURNING id
   `) as { id: string }[];
 
@@ -262,7 +274,7 @@ export async function deleteWorkspace(
 
   await audit({
     actorUserId: user.id,
-    tenantId: user.tenantId,
+    tenantId,
     entityType: "job_workspace",
     entityId: id,
     action: "WORKSPACE_DELETED",
@@ -291,17 +303,18 @@ export interface DashboardStats {
 
 export async function getDashboardStats(user: AppUser): Promise<DashboardStats> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     WITH latest AS (
       SELECT a.match_category, a.submission_readiness
       FROM job_match_candidates jmc
       JOIN candidate_match_analyses a ON a.id = jmc.latest_analysis_id
-      WHERE jmc.owner_user_id = ${user.id}
+      WHERE a.tenant_id = ${tenantId}
     )
     SELECT
       (SELECT COUNT(*) FROM job_match_workspaces
-        WHERE owner_user_id = ${user.id} AND workspace_status = 'ACTIVE') AS active_jobs,
-      (SELECT COUNT(*) FROM candidates WHERE owner_user_id = ${user.id}) AS total_candidates,
+        WHERE tenant_id = ${tenantId} AND workspace_status = 'ACTIVE') AS active_jobs,
+      (SELECT COUNT(*) FROM candidates WHERE tenant_id = ${tenantId}) AS total_candidates,
       (SELECT COUNT(*) FROM latest WHERE match_category = 'STRONG_MATCH') AS strong_matches,
       (SELECT COUNT(*) FROM latest WHERE submission_readiness = 'VERIFY_BEFORE_SUBMISSION') AS needs_verification,
       (SELECT COUNT(*) FROM latest WHERE submission_readiness = 'READY_TO_SUBMIT') AS ready_to_submit
@@ -332,6 +345,7 @@ export async function getRecentAnalyses(
   limit = 8
 ): Promise<RecentAnalysis[]> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     SELECT a.id AS analysis_id, a.candidate_id, a.workspace_id,
            c.full_name AS candidate_name, w.job_title,
@@ -339,7 +353,7 @@ export async function getRecentAnalyses(
     FROM candidate_match_analyses a
     LEFT JOIN candidates c ON c.id = a.candidate_id
     LEFT JOIN job_match_workspaces w ON w.id = a.workspace_id
-    WHERE a.owner_user_id = ${user.id}
+    WHERE a.tenant_id = ${tenantId}
     ORDER BY a.created_at DESC
     LIMIT ${limit}
   `) as RecentAnalysis[];

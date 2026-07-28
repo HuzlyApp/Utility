@@ -7,7 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/primitives";
 
-const NAV = [
+const BASE_NAV = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/jobs", label: "Jobs" },
   { href: "/candidates", label: "Candidates" },
@@ -30,9 +30,11 @@ function isNavActive(href: string, pathname: string): boolean {
 export function AppHeader({
   email,
   role,
+  tenantName,
 }: {
   email: string;
-  role: "ADMIN" | "RECRUITER";
+  role: "SUPER_ADMIN" | "TENANT_ADMIN" | "RECRUITER" | "VIEWER";
+  tenantName?: string | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -47,6 +49,12 @@ export function AppHeader({
       router.refresh();
     }
   }
+
+  const nav = [
+    ...BASE_NAV,
+    ...(role === "TENANT_ADMIN" ? [{ href: "/users", label: "Users" }] : []),
+    ...(role === "TENANT_ADMIN" ? [{ href: "/settings", label: "Settings" }] : []),
+  ];
 
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/70">
@@ -65,11 +73,11 @@ export function AppHeader({
             </div>
             <div className="leading-tight">
               <p className="text-sm font-semibold text-navy-600">BrassHR</p>
-              <p className="text-xs text-slate-500">HR simplified</p>
+              <p className="text-xs text-slate-500">{tenantName ?? "HR simplified"}</p>
             </div>
           </Link>
           <nav className="hidden items-center gap-1 sm:flex">
-            {NAV.map((item) => {
+            {nav.map((item) => {
               const active = isNavActive(item.href, pathname);
               return (
                 <Link
@@ -89,7 +97,9 @@ export function AppHeader({
           </nav>
         </div>
         <div className="flex items-center gap-3">
-          {role === "ADMIN" && <Badge tone="blue">Admin</Badge>}
+          {(role === "TENANT_ADMIN" || role === "SUPER_ADMIN") && (
+            <Badge tone="blue">{role === "SUPER_ADMIN" ? "Super Admin" : "Tenant Admin"}</Badge>
+          )}
           <div className="hidden text-right leading-tight sm:block">
             <p className="text-xs font-medium text-slate-700">{email}</p>
             <Link

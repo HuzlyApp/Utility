@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { ok, fail } from "@/lib/http";
-import { withUser } from "@/lib/api-helpers";
+import { withTenantUser } from "@/lib/api-helpers";
 import { getWorkspace } from "@/lib/dal/workspaces";
 import {
   createCandidate,
@@ -32,7 +32,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { workspaceId: string } }
 ) {
-  return withUser("candidates.list", async (user) => {
+  return withTenantUser("candidates.list", async (user) => {
     const ws = await getWorkspace(user, params.workspaceId);
     if (!ws) return fail("Workspace not found.", 404, "NOT_FOUND");
     const rows = await listWorkspaceCandidates(user, params.workspaceId);
@@ -47,7 +47,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { workspaceId: string } }
 ) {
-  return withUser("candidates.add", async (user) => {
+  return withTenantUser("candidates.add", async (user) => {
     const ws = await getWorkspace(user, params.workspaceId);
     if (!ws) return fail("Workspace not found.", 404, "NOT_FOUND");
 

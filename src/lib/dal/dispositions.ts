@@ -1,11 +1,16 @@
 import "server-only";
 import { getSql } from "./client";
 import { audit } from "./audit";
-import type { AppUser } from "@/lib/auth/session";
+import { AuthError, type AppUser } from "@/lib/auth/session";
 import { DASHBOARD_DISPOSITIONS, type DashboardDisposition } from "./types";
 
 export function isDashboardDisposition(v: string): v is DashboardDisposition {
   return (DASHBOARD_DISPOSITIONS as readonly string[]).includes(v);
+}
+
+function tenantIdOf(user: AppUser): string {
+  if (!user.tenantId) throw new AuthError("Tenant context is required.", 403);
+  return user.tenantId;
 }
 
 // Records a recruiter decision SEPARATELY from the AI recommendation (spec §11).
@@ -18,6 +23,7 @@ export async function recordDisposition(params: {
   notes?: string;
 }): Promise<string> {
   const sql = getSql();
+  const tenantId = tenantIdOf(params.user);
   const rows = (await sql`
     INSERT INTO recruiter_dispositions (
       candidate_id, workspace_id, analysis_id, owner_user_id, disposition, notes, decided_by
@@ -28,7 +34,7 @@ export async function recordDisposition(params: {
   `) as { id: string }[];
   await audit({
     actorUserId: params.user.id,
-    tenantId: params.user.tenantId,
+    tenantId,
     entityType: "candidate",
     entityId: params.candidateId,
     action: "DISPOSITION_RECORDED",
@@ -50,10 +56,11 @@ export async function getLatestDisposition(
   candidateId: string
 ): Promise<DispositionRow | null> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     SELECT id, disposition, notes, created_at FROM recruiter_dispositions
     WHERE candidate_id = ${candidateId} AND workspace_id = ${workspaceId}
-      AND owner_user_id = ${user.id}
+      AND workspace_id IN (SELECT id FROM job_match_workspaces WHERE tenant_id = ${tenantId})
     ORDER BY created_at DESC LIMIT 1
   `) as DispositionRow[];
   return rows[0] ?? null;

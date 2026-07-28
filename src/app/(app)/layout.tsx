@@ -14,10 +14,11 @@ export default async function AppLayout({
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (user.mustChangePassword) redirect("/change-password");
+  if (user.role === "SUPER_ADMIN") redirect("/superadmin");
 
   return (
     <div className="min-h-screen">
-      <AppHeader email={user.email} role={user.role} />
+      <AppHeader email={user.email} role={user.role} tenantName={user.tenantName} />
       <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
     </div>
   );

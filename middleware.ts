@@ -25,10 +25,12 @@ export const config = {
     "/dashboard/:path*",
     "/jobs/:path*",
     "/candidates/:path*",
+    "/users/:path*",
     "/analyses/:path*",
     "/reports/:path*",
     "/settings/:path*",
-    "/admin/:path*",
+    "/workspace/:path*",
+    "/superadmin/:path*",
     "/change-password",
   ],
 };

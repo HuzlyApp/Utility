@@ -46,6 +46,8 @@ export const config = {
   neonAuthSessionDataTtlSeconds: Number(
     process.env.NEON_AUTH_SESSION_DATA_TTL_SECONDS ?? "604800"
   ),
+  defaultSuperAdminEmail: process.env.DEFAULT_SUPERADMIN_EMAIL ?? "",
+  defaultSuperAdminPassword: process.env.DEFAULT_SUPERADMIN_PASSWORD ?? "",
 
   // Image / OCR limits
   maxImageDimension: Number(process.env.MAX_IMAGE_DIMENSION ?? "10000"),

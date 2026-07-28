@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { ok, fail } from "@/lib/http";
-import { withUser } from "@/lib/api-helpers";
+import { withTenantUser } from "@/lib/api-helpers";
 import {
   getWorkspace,
   updateWorkspace,
@@ -16,7 +16,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { workspaceId: string } }
 ) {
-  return withUser("workspaces.update", async (user) => {
+  return withTenantUser("workspaces.update", async (user) => {
     const existing = await getWorkspace(user, params.workspaceId);
     if (!existing) return fail("Workspace not found.", 404, "NOT_FOUND");
 
@@ -33,7 +33,7 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: { workspaceId: string } }
 ) {
-  return withUser("workspaces.delete", async (user) => {
+  return withTenantUser("workspaces.delete", async (user) => {
     const result = await deleteWorkspace(user, params.workspaceId);
     if (!result.deleted) return fail("Workspace not found.", 404, "NOT_FOUND");
     return ok(result);

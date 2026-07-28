@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "crypto";
 import { getSql } from "@/lib/dal/client";
-import type { AppUser } from "@/lib/auth/session";
+import { AuthError, type AppUser } from "@/lib/auth/session";
 import {
   isCheckableCandidateName,
   normalizeCandidateName,
@@ -15,6 +15,11 @@ import {
 } from "./classify";
 import { issueDuplicateConfirmationToken } from "./confirmation-token";
 import type { DuplicateCheckResult, DuplicateMatch } from "./types";
+
+function tenantIdOf(user: AppUser): string {
+  if (!user.tenantId) throw new AuthError("Tenant context is required.", 403);
+  return user.tenantId;
+}
 
 function hashResumeBytes(b64Chunks: string[]): string | null {
   if (b64Chunks.length === 0) return null;
@@ -40,12 +45,13 @@ async function getCandidateResumeHash(
   candidateId: string
 ): Promise<string | null> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     SELECT encode(file_bytes, 'base64') AS file_b64
     FROM entity_files
     WHERE entity_type = 'candidate'
       AND entity_id = ${candidateId}
-      AND owner_user_id = ${user.id}
+      AND owner_user_id IN (SELECT user_id FROM user_profiles WHERE tenant_id = ${tenantId})
       AND file_bytes IS NOT NULL
   `) as Array<{ file_b64: string | null }>;
   return hashResumeBytes(
@@ -91,6 +97,7 @@ export async function findDuplicateCandidatesInWorkspace(
   if (!normalizedName) return null;
 
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const excludeId = options.excludeCandidateId ?? null;
 
   const rows = (await sql`
@@ -116,9 +123,8 @@ export async function findDuplicateCandidatesInWorkspace(
       LIMIT 1
     ) d ON true
     WHERE jmc.workspace_id = ${workspaceId}
-      AND jmc.owner_user_id = ${user.id}
-      AND c.tenant_id = ${user.tenantId}
-      AND c.owner_user_id = ${user.id}
+      AND c.tenant_id = ${tenantId}
+      AND ws.tenant_id = ${tenantId}
       AND c.normalized_full_name = ${normalizedName}
       AND (${excludeId}::uuid IS NULL OR c.id != ${excludeId})
     ORDER BY a.created_at DESC NULLS LAST, c.full_name ASC
@@ -166,7 +172,7 @@ export async function findDuplicateCandidatesInWorkspace(
 
   const duplicate_confirmation_token = issueDuplicateConfirmationToken({
     userId: user.id,
-    tenantId: user.tenantId,
+    tenantId,
     candidateId: tokenSubjectId,
     normalizedName,
     matchedCandidateIds,
@@ -191,11 +197,11 @@ export async function findDuplicateCandidates(
   candidateName: string | null | undefined
 ): Promise<DuplicateCheckResult | null> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const currentRows = (await sql`
     SELECT email, phone FROM candidates
     WHERE id = ${candidateId}
-      AND owner_user_id = ${user.id}
-      AND tenant_id = ${user.tenantId}
+      AND tenant_id = ${tenantId}
   `) as Array<{ email: string | null; phone: string | null }>;
   const currentRow = currentRows[0];
   if (!currentRow) return null;

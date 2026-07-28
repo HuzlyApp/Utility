@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { ok, fail } from "@/lib/http";
-import { withUser } from "@/lib/api-helpers";
+import { withTenantUser } from "@/lib/api-helpers";
 import { getCandidate, updateCandidate, type CandidateInput } from "@/lib/dal/candidates";
 
 export const runtime = "nodejs";
@@ -12,7 +12,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { candidateId: string } }
 ) {
-  return withUser("candidates.update", async (user) => {
+  return withTenantUser("candidates.update", async (user) => {
     const existing = await getCandidate(user, params.candidateId);
     if (!existing) return fail("Candidate not found.", 404, "NOT_FOUND");
     const body = (await req.json()) as CandidateInput;

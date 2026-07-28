@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { fail, logServerError, logOperational } from "@/lib/http";
-import { withUser } from "@/lib/api-helpers";
+import { withTenantUser } from "@/lib/api-helpers";
 import { getWorkspace } from "@/lib/dal/workspaces";
 import {
   getCandidate,
@@ -115,7 +115,7 @@ export async function POST(
   req: Request,
   { params }: { params: { workspaceId: string; candidateId: string } }
 ) {
-  return withUser("candidates.analyze", async (user) => {
+  return withTenantUser("candidates.analyze", async (user) => {
     const ws = await getWorkspace(user, params.workspaceId);
     if (!ws) return fail("Workspace not found.", 404, "NOT_FOUND");
     if (!ws.job_description_text) {

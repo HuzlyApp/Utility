@@ -1,7 +1,7 @@
 import "server-only";
 import { getSql } from "./client";
 import { audit } from "./audit";
-import type { AppUser } from "@/lib/auth/session";
+import { AuthError, type AppUser } from "@/lib/auth/session";
 
 export interface ScreeningAnswer {
   id: string;
@@ -12,17 +12,23 @@ export interface ScreeningAnswer {
   updated_at: string;
 }
 
+function tenantIdOf(user: AppUser): string {
+  if (!user.tenantId) throw new AuthError("Tenant context is required.", 403);
+  return user.tenantId;
+}
+
 export async function listScreeningAnswers(
   user: AppUser,
   candidateId: string,
   workspaceId: string
 ): Promise<ScreeningAnswer[]> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     SELECT id, question, answer, related_requirement, priority, updated_at
     FROM candidate_screening_answers
     WHERE candidate_id = ${candidateId} AND workspace_id = ${workspaceId}
-      AND owner_user_id = ${user.id}
+      AND workspace_id IN (SELECT id FROM job_match_workspaces WHERE tenant_id = ${tenantId})
     ORDER BY priority ASC NULLS LAST, created_at ASC
   `) as ScreeningAnswer[];
   return rows;
@@ -40,10 +46,12 @@ export async function saveScreeningAnswer(params: {
   priority?: number;
 }): Promise<void> {
   const sql = getSql();
+  const tenantId = tenantIdOf(params.user);
   const existing = (await sql`
     SELECT id FROM candidate_screening_answers
     WHERE candidate_id = ${params.candidateId} AND workspace_id = ${params.workspaceId}
-      AND owner_user_id = ${params.user.id} AND question = ${params.question}
+      AND workspace_id IN (SELECT id FROM job_match_workspaces WHERE tenant_id = ${tenantId})
+      AND question = ${params.question}
     LIMIT 1
   `) as { id: string }[];
 
@@ -68,7 +76,7 @@ export async function saveScreeningAnswer(params: {
 
   await audit({
     actorUserId: params.user.id,
-    tenantId: params.user.tenantId,
+    tenantId,
     entityType: "candidate",
     entityId: params.candidateId,
     action: "SCREENING_ANSWER_SAVED",

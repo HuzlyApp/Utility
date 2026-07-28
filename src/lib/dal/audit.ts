@@ -17,7 +17,9 @@ export async function audit(entry: {
       actor_user_id, tenant_id, entity_type, entity_id, action,
       previous_value_json, new_value_json
     ) VALUES (
-      ${entry.actorUserId}, ${entry.tenantId ?? "default"}, ${entry.entityType},
+      ${entry.actorUserId},
+      COALESCE(${entry.tenantId}::uuid, (SELECT id FROM tenants WHERE slug = 'default' LIMIT 1)),
+      ${entry.entityType},
       ${entry.entityId}, ${entry.action},
       ${entry.previousValue ? JSON.stringify(entry.previousValue) : null},
       ${entry.newValue ? JSON.stringify(entry.newValue) : null}

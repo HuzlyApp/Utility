@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { ok, fail } from "@/lib/http";
-import { withUser } from "@/lib/api-helpers";
+import { withTenantUser } from "@/lib/api-helpers";
 import { getCandidate } from "@/lib/dal/candidates";
 import { getWorkspace } from "@/lib/dal/workspaces";
 import { recordDisposition, isDashboardDisposition } from "@/lib/dal/dispositions";
@@ -14,7 +14,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { candidateId: string } }
 ) {
-  return withUser("candidates.disposition", async (user) => {
+  return withTenantUser("candidates.disposition", async (user) => {
     const body = (await req.json()) as {
       workspace_id?: string;
       disposition?: string;

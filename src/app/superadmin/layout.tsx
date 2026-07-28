@@ -1,0 +1,42 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getCurrentUser } from "@/lib/auth/session";
+import { SignOutButton } from "@/components/app/sign-out-button";
+
+export const dynamic = "force-dynamic";
+
+export default async function SuperAdminLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  if (user.mustChangePassword) redirect("/change-password");
+  if (user.role !== "SUPER_ADMIN") redirect("/dashboard");
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <header className="border-b border-slate-200 bg-white">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-900">Super Admin</p>
+            <p className="text-xs text-slate-500">Platform control plane</p>
+          </div>
+          <nav className="flex items-center gap-4 text-sm">
+            <Link href="/superadmin" className="text-brand-700 hover:underline">
+              Overview
+            </Link>
+            <Link href="/superadmin/tenants" className="text-brand-700 hover:underline">
+              Tenants
+            </Link>
+            <SignOutButton
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            />
+          </nav>
+        </div>
+      </header>
+      <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
+    </div>
+  );
+}

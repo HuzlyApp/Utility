@@ -1,7 +1,7 @@
 import "server-only";
 import { getSql } from "./client";
 import { audit } from "./audit";
-import type { AppUser } from "@/lib/auth/session";
+import { AuthError, type AppUser } from "@/lib/auth/session";
 import type { VerifiedRecruiterInputs } from "@/lib/types";
 import { normalizeCandidateName } from "@/lib/duplicate-candidate/normalize";
 import type {
@@ -25,11 +25,17 @@ export interface CandidateInput {
 
 const num = (v: unknown) => (v == null ? null : Number(v));
 
+function tenantIdOf(user: AppUser): string {
+  if (!user.tenantId) throw new AuthError("Tenant context is required.", 403);
+  return user.tenantId;
+}
+
 export async function createCandidate(
   user: AppUser,
   input: CandidateInput
 ): Promise<string> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const normalizedName = input.full_name
     ? normalizeCandidateName(input.full_name) || null
     : null;
@@ -39,7 +45,7 @@ export async function createCandidate(
       extracted_resume_text, ocr_confidence, extraction_quality, recruiter_notes,
       verified_information, created_by
     ) VALUES (
-      ${user.id}, ${user.tenantId}, ${input.full_name ?? null}, ${normalizedName}, ${input.email ?? null},
+      ${user.id}, ${tenantId}, ${input.full_name ?? null}, ${normalizedName}, ${input.email ?? null},
       ${input.phone ?? null}, ${input.specialty ?? null}, ${input.location ?? null},
       ${input.extracted_resume_text ?? null}, ${input.ocr_confidence ?? null},
       ${input.extraction_quality ?? null}, ${input.recruiter_notes ?? null},
@@ -49,7 +55,7 @@ export async function createCandidate(
   const id = rows[0].id;
   await audit({
     actorUserId: user.id,
-    tenantId: user.tenantId,
+    tenantId,
     entityType: "candidate",
     entityId: id,
     action: "CANDIDATE_CREATED",
@@ -63,8 +69,9 @@ export async function getCandidate(
   id: string
 ): Promise<Candidate | null> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
-    SELECT * FROM candidates WHERE id = ${id} AND owner_user_id = ${user.id}
+    SELECT * FROM candidates WHERE id = ${id} AND tenant_id = ${tenantId}
   `) as Candidate[];
   return rows[0] ?? null;
 }
@@ -77,6 +84,7 @@ export async function updateCandidate(
   const existing = await getCandidate(user, id);
   if (!existing) return false;
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const nextName = input.full_name ?? existing.full_name;
   const normalizedName = nextName ? normalizeCandidateName(nextName) || null : null;
   await sql`
@@ -95,11 +103,11 @@ export async function updateCandidate(
         input.verified_information ?? existing.verified_information
       )},
       updated_at = now()
-    WHERE id = ${id} AND owner_user_id = ${user.id}
+    WHERE id = ${id} AND tenant_id = ${tenantId}
   `;
   await audit({
     actorUserId: user.id,
-    tenantId: user.tenantId,
+    tenantId,
     entityType: "candidate",
     entityId: id,
     action: "CANDIDATE_UPDATED",
@@ -114,6 +122,7 @@ export async function attachCandidateToWorkspace(
   status: CandidatePipelineStatus
 ): Promise<string> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     INSERT INTO job_match_candidates (workspace_id, candidate_id, owner_user_id, status)
     VALUES (${workspaceId}, ${candidateId}, ${user.id}, ${status})
@@ -121,6 +130,15 @@ export async function attachCandidateToWorkspace(
     DO UPDATE SET status = EXCLUDED.status, updated_at = now()
     RETURNING id
   `) as { id: string }[];
+  await sql`
+    UPDATE job_match_candidates
+    SET owner_user_id = ${user.id}
+    WHERE id = ${rows[0].id}
+      AND EXISTS (
+        SELECT 1 FROM job_match_workspaces w
+        WHERE w.id = ${workspaceId} AND w.tenant_id = ${tenantId}
+      )
+  `;
   return rows[0].id;
 }
 
@@ -135,10 +153,16 @@ export async function getJobCandidate(
   updated_at: string;
 } | null> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
-    SELECT id, status, latest_analysis_id, updated_at FROM job_match_candidates
-    WHERE workspace_id = ${workspaceId} AND candidate_id = ${candidateId}
-      AND owner_user_id = ${user.id}
+    SELECT jmc.id, jmc.status, jmc.latest_analysis_id, jmc.updated_at
+    FROM job_match_candidates jmc
+    JOIN job_match_workspaces w ON w.id = jmc.workspace_id
+    JOIN candidates c ON c.id = jmc.candidate_id
+    WHERE jmc.workspace_id = ${workspaceId}
+      AND jmc.candidate_id = ${candidateId}
+      AND w.tenant_id = ${tenantId}
+      AND c.tenant_id = ${tenantId}
   `) as Array<{
     id: string;
     status: CandidatePipelineStatus;
@@ -155,6 +179,7 @@ export async function releaseAnalyzingLock(
   options: { force?: boolean; staleAfterMs?: number } = {}
 ): Promise<boolean> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const staleAfterMs = options.staleAfterMs ?? 5 * 60 * 1000;
 
   if (options.force) {
@@ -162,7 +187,7 @@ export async function releaseAnalyzingLock(
       UPDATE job_match_candidates
       SET status = 'FAILED', updated_at = now()
       WHERE id = ${jobMatchCandidateId}
-        AND owner_user_id = ${user.id}
+        AND workspace_id IN (SELECT id FROM job_match_workspaces WHERE tenant_id = ${tenantId})
         AND status = 'ANALYZING'
       RETURNING id
     `) as { id: string }[];
@@ -173,7 +198,7 @@ export async function releaseAnalyzingLock(
     UPDATE job_match_candidates
     SET status = 'FAILED', updated_at = now()
     WHERE id = ${jobMatchCandidateId}
-      AND owner_user_id = ${user.id}
+      AND workspace_id IN (SELECT id FROM job_match_workspaces WHERE tenant_id = ${tenantId})
       AND status = 'ANALYZING'
       AND updated_at < now() - (${staleAfterMs} * interval '1 millisecond')
     RETURNING id
@@ -187,9 +212,11 @@ export async function setJobCandidateStatus(
   status: CandidatePipelineStatus
 ): Promise<void> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   await sql`
     UPDATE job_match_candidates SET status = ${status}, updated_at = now()
-    WHERE id = ${jobMatchCandidateId} AND owner_user_id = ${user.id}
+    WHERE id = ${jobMatchCandidateId}
+      AND workspace_id IN (SELECT id FROM job_match_workspaces WHERE tenant_id = ${tenantId})
   `;
 }
 
@@ -199,10 +226,12 @@ export async function setLatestAnalysis(
   analysisId: string
 ): Promise<void> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   await sql`
     UPDATE job_match_candidates
     SET latest_analysis_id = ${analysisId}, status = 'ANALYZED', updated_at = now()
-    WHERE id = ${jobMatchCandidateId} AND owner_user_id = ${user.id}
+    WHERE id = ${jobMatchCandidateId}
+      AND workspace_id IN (SELECT id FROM job_match_workspaces WHERE tenant_id = ${tenantId})
   `;
 }
 
@@ -212,16 +241,17 @@ export async function removeCandidateFromJob(
   candidateId: string
 ): Promise<boolean> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     DELETE FROM job_match_candidates
     WHERE workspace_id = ${workspaceId} AND candidate_id = ${candidateId}
-      AND owner_user_id = ${user.id}
+      AND workspace_id IN (SELECT id FROM job_match_workspaces WHERE tenant_id = ${tenantId})
     RETURNING id
   `) as { id: string }[];
   if (rows.length === 0) return false;
   await audit({
     actorUserId: user.id,
-    tenantId: user.tenantId,
+    tenantId,
     entityType: "candidate",
     entityId: candidateId,
     action: "CANDIDATE_REMOVED_FROM_JOB",
@@ -255,6 +285,7 @@ export async function listDashboardCandidates(
   }
 ): Promise<DashboardCandidateRow[]> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const matchCategory = opts?.matchCategory ?? null;
   const submissionReadiness = opts?.submissionReadiness ?? null;
   const filtered = Boolean(matchCategory || submissionReadiness);
@@ -269,7 +300,8 @@ export async function listDashboardCandidates(
         (
           SELECT jmc.workspace_id
           FROM job_match_candidates jmc
-          WHERE jmc.candidate_id = c.id AND jmc.owner_user_id = ${user.id}
+          JOIN job_match_workspaces w ON w.id = jmc.workspace_id
+          WHERE jmc.candidate_id = c.id AND w.tenant_id = ${tenantId}
           ORDER BY jmc.updated_at DESC
           LIMIT 1
         ) AS workspace_id,
@@ -277,7 +309,7 @@ export async function listDashboardCandidates(
           SELECT w.job_title
           FROM job_match_candidates jmc
           JOIN job_match_workspaces w ON w.id = jmc.workspace_id
-          WHERE jmc.candidate_id = c.id AND jmc.owner_user_id = ${user.id}
+          WHERE jmc.candidate_id = c.id AND w.tenant_id = ${tenantId}
           ORDER BY jmc.updated_at DESC
           LIMIT 1
         ) AS job_title,
@@ -285,7 +317,8 @@ export async function listDashboardCandidates(
           SELECT a.overall_match_score
           FROM job_match_candidates jmc
           LEFT JOIN candidate_match_analyses a ON a.id = jmc.latest_analysis_id
-          WHERE jmc.candidate_id = c.id AND jmc.owner_user_id = ${user.id}
+          JOIN job_match_workspaces w ON w.id = jmc.workspace_id
+          WHERE jmc.candidate_id = c.id AND w.tenant_id = ${tenantId}
           ORDER BY jmc.updated_at DESC
           LIMIT 1
         ) AS match_score,
@@ -293,7 +326,8 @@ export async function listDashboardCandidates(
           SELECT a.match_category
           FROM job_match_candidates jmc
           LEFT JOIN candidate_match_analyses a ON a.id = jmc.latest_analysis_id
-          WHERE jmc.candidate_id = c.id AND jmc.owner_user_id = ${user.id}
+          JOIN job_match_workspaces w ON w.id = jmc.workspace_id
+          WHERE jmc.candidate_id = c.id AND w.tenant_id = ${tenantId}
           ORDER BY jmc.updated_at DESC
           LIMIT 1
         ) AS match_category,
@@ -301,13 +335,14 @@ export async function listDashboardCandidates(
           SELECT a.submission_readiness
           FROM job_match_candidates jmc
           LEFT JOIN candidate_match_analyses a ON a.id = jmc.latest_analysis_id
-          WHERE jmc.candidate_id = c.id AND jmc.owner_user_id = ${user.id}
+          JOIN job_match_workspaces w ON w.id = jmc.workspace_id
+          WHERE jmc.candidate_id = c.id AND w.tenant_id = ${tenantId}
           ORDER BY jmc.updated_at DESC
           LIMIT 1
         ) AS submission_readiness,
         c.updated_at
       FROM candidates c
-      WHERE c.owner_user_id = ${user.id}
+      WHERE c.tenant_id = ${tenantId}
       ORDER BY c.updated_at DESC
     `) as DashboardCandidateRow[];
     return rows;
@@ -329,7 +364,7 @@ export async function listDashboardCandidates(
     JOIN candidates c ON c.id = jmc.candidate_id
     JOIN job_match_workspaces w ON w.id = jmc.workspace_id
     JOIN candidate_match_analyses a ON a.id = jmc.latest_analysis_id
-    WHERE jmc.owner_user_id = ${user.id}
+    WHERE w.tenant_id = ${tenantId}
       AND (${matchCategory}::text IS NULL OR a.match_category = ${matchCategory})
       AND (${submissionReadiness}::text IS NULL OR a.submission_readiness = ${submissionReadiness})
     ORDER BY a.overall_match_score DESC NULLS LAST, c.full_name ASC
@@ -344,9 +379,11 @@ export async function getPrimaryWorkspaceId(
   candidateId: string
 ): Promise<string | null> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     SELECT workspace_id FROM job_match_candidates
-    WHERE candidate_id = ${candidateId} AND owner_user_id = ${user.id}
+    WHERE candidate_id = ${candidateId}
+      AND workspace_id IN (SELECT id FROM job_match_workspaces WHERE tenant_id = ${tenantId})
     ORDER BY created_at ASC LIMIT 1
   `) as { workspace_id: string }[];
   return rows[0]?.workspace_id ?? null;
@@ -358,6 +395,7 @@ export async function listWorkspaceCandidates(
   workspaceId: string
 ): Promise<RankedCandidateRow[]> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     SELECT
       jmc.id AS job_match_candidate_id,
@@ -392,7 +430,9 @@ export async function listWorkspaceCandidates(
       WHERE rd.candidate_id = jmc.candidate_id AND rd.workspace_id = jmc.workspace_id
       ORDER BY created_at DESC LIMIT 1
     ) d ON true
-    WHERE jmc.workspace_id = ${workspaceId} AND jmc.owner_user_id = ${user.id}
+    WHERE jmc.workspace_id = ${workspaceId}
+      AND w.id = ${workspaceId}
+      AND w.tenant_id = ${tenantId}
     ORDER BY a.overall_match_score DESC NULLS LAST, c.full_name ASC
   `) as Array<Record<string, unknown>>;
 

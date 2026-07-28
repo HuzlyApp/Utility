@@ -1,7 +1,7 @@
 import "server-only";
 import { getSql } from "./client";
 import { audit } from "./audit";
-import type { AppUser } from "@/lib/auth/session";
+import { AuthError, type AppUser } from "@/lib/auth/session";
 import type { EntityFile } from "./types";
 
 export interface SaveFileInput {
@@ -20,6 +20,11 @@ export interface SaveFileInput {
   needsReview?: boolean;
 }
 
+function tenantIdOf(user: AppUser): string {
+  if (!user.tenantId) throw new AuthError("Tenant context is required.", 403);
+  return user.tenantId;
+}
+
 // Persists the ORIGINAL file bytes (base64-encoded into bytea) plus its
 // separately-stored extracted text and OCR metadata (spec §5/§12/§13). The
 // logical storage_path is never exposed publicly; downloads go through an
@@ -29,6 +34,7 @@ export async function saveEntityFile(
   input: SaveFileInput
 ): Promise<string> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const b64 = input.bytes.toString("base64");
   const rows = (await sql`
     INSERT INTO entity_files (
@@ -48,7 +54,7 @@ export async function saveEntityFile(
   await sql`UPDATE entity_files SET storage_path = ${`db://entity_files/${id}`} WHERE id = ${id}`;
   await audit({
     actorUserId: user.id,
-    tenantId: user.tenantId,
+    tenantId,
     entityType: "entity_file",
     entityId: id,
     action: "FILE_UPLOADED",
@@ -68,13 +74,24 @@ export async function listEntityFiles(
   entityId: string
 ): Promise<EntityFile[]> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     SELECT id, entity_type, entity_id, owner_user_id, file_name, file_type, mime_type,
            byte_size, storage_path, is_image, page_order, extracted_text,
            extraction_method, extraction_quality, ocr_confidence, needs_review, created_at
     FROM entity_files
     WHERE entity_type = ${entityType} AND entity_id = ${entityId}
-      AND owner_user_id = ${user.id}
+      AND EXISTS (
+        SELECT 1 FROM candidates c
+        WHERE ${entityType} = 'candidate'
+          AND c.id = ${entityId}
+          AND c.tenant_id = ${tenantId}
+      OR EXISTS (
+        SELECT 1 FROM job_match_workspaces w
+        WHERE ${entityType} = 'job_workspace'
+          AND w.id = ${entityId}
+          AND w.tenant_id = ${tenantId}
+      )
     ORDER BY page_order ASC, created_at ASC
   `) as EntityFile[];
   return rows;
@@ -85,10 +102,27 @@ export async function getFileForDownload(
   fileId: string
 ): Promise<{ bytes: Buffer; mimeType: string; fileName: string } | null> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     SELECT encode(file_bytes, 'base64') AS file_b64, mime_type, file_name
-    FROM entity_files
-    WHERE id = ${fileId} AND owner_user_id = ${user.id}
+    FROM entity_files f
+    WHERE id = ${fileId}
+      AND (
+        EXISTS (
+          SELECT 1
+          FROM candidates c
+          WHERE f.entity_type = 'candidate'
+            AND c.id = f.entity_id
+            AND c.tenant_id = ${tenantId}
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM job_match_workspaces w
+          WHERE f.entity_type = 'job_workspace'
+            AND w.id = f.entity_id
+            AND w.tenant_id = ${tenantId}
+        )
+      )
   `) as Array<{ file_b64: string | null; mime_type: string | null; file_name: string }>;
   const row = rows[0];
   if (!row || !row.file_b64) return null;
@@ -105,17 +139,28 @@ export async function updateFileExtractedText(
   text: string
 ): Promise<boolean> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     UPDATE entity_files
     SET extracted_text = ${text}, extraction_method = 'MANUAL',
         needs_review = false, updated_at = now()
-    WHERE id = ${fileId} AND owner_user_id = ${user.id}
+    WHERE id = ${fileId}
+      AND (
+        EXISTS (
+          SELECT 1 FROM candidates c
+          WHERE entity_type = 'candidate' AND c.id = entity_id AND c.tenant_id = ${tenantId}
+        )
+        OR EXISTS (
+          SELECT 1 FROM job_match_workspaces w
+          WHERE entity_type = 'job_workspace' AND w.id = entity_id AND w.tenant_id = ${tenantId}
+        )
+      )
     RETURNING id, entity_type, entity_id
   `) as Array<{ id: string; entity_type: string; entity_id: string }>;
   if (rows.length === 0) return false;
   await audit({
     actorUserId: user.id,
-    tenantId: user.tenantId,
+    tenantId,
     entityType: "entity_file",
     entityId: fileId,
     action: "FILE_TEXT_EDITED",
@@ -129,9 +174,20 @@ export async function reorderFile(
   pageOrder: number
 ): Promise<boolean> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     UPDATE entity_files SET page_order = ${pageOrder}, updated_at = now()
-    WHERE id = ${fileId} AND owner_user_id = ${user.id}
+    WHERE id = ${fileId}
+      AND (
+        EXISTS (
+          SELECT 1 FROM candidates c
+          WHERE entity_type = 'candidate' AND c.id = entity_id AND c.tenant_id = ${tenantId}
+        )
+        OR EXISTS (
+          SELECT 1 FROM job_match_workspaces w
+          WHERE entity_type = 'job_workspace' AND w.id = entity_id AND w.tenant_id = ${tenantId}
+        )
+      )
     RETURNING id
   `) as { id: string }[];
   return rows.length > 0;
@@ -142,14 +198,26 @@ export async function deleteEntityFile(
   fileId: string
 ): Promise<boolean> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
-    DELETE FROM entity_files WHERE id = ${fileId} AND owner_user_id = ${user.id}
+    DELETE FROM entity_files
+    WHERE id = ${fileId}
+      AND (
+        EXISTS (
+          SELECT 1 FROM candidates c
+          WHERE entity_type = 'candidate' AND c.id = entity_id AND c.tenant_id = ${tenantId}
+        )
+        OR EXISTS (
+          SELECT 1 FROM job_match_workspaces w
+          WHERE entity_type = 'job_workspace' AND w.id = entity_id AND w.tenant_id = ${tenantId}
+        )
+      )
     RETURNING id
   `) as { id: string }[];
   if (rows.length === 0) return false;
   await audit({
     actorUserId: user.id,
-    tenantId: user.tenantId,
+    tenantId,
     entityType: "entity_file",
     entityId: fileId,
     action: "FILE_DELETED",
@@ -166,11 +234,22 @@ export async function getEntityImageBytes(
   limit = 5
 ): Promise<Array<{ bytes: Buffer; mimeType: string }>> {
   const sql = getSql();
+  const tenantId = tenantIdOf(user);
   const rows = (await sql`
     SELECT encode(file_bytes, 'base64') AS file_b64, mime_type
     FROM entity_files
     WHERE entity_type = ${entityType} AND entity_id = ${entityId}
-      AND owner_user_id = ${user.id} AND is_image = true
+      AND (
+        EXISTS (
+          SELECT 1 FROM candidates c
+          WHERE ${entityType} = 'candidate' AND c.id = ${entityId} AND c.tenant_id = ${tenantId}
+        )
+        OR EXISTS (
+          SELECT 1 FROM job_match_workspaces w
+          WHERE ${entityType} = 'job_workspace' AND w.id = ${entityId} AND w.tenant_id = ${tenantId}
+        )
+      )
+      AND is_image = true
     ORDER BY page_order ASC, created_at ASC
     LIMIT ${limit}
   `) as Array<{ file_b64: string | null; mime_type: string | null }>;

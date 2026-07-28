@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { ok, fail } from "@/lib/http";
-import { withUser } from "@/lib/api-helpers";
+import { withTenantUser } from "@/lib/api-helpers";
 import { getAnalysis } from "@/lib/dal/analyses";
 
 export const runtime = "nodejs";
@@ -10,7 +10,7 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { analysisId: string } }
 ) {
-  return withUser("analyses.get", async (user) => {
+  return withTenantUser("analyses.get", async (user) => {
     const analysis = await getAnalysis(user, params.analysisId);
     if (!analysis) return fail("Analysis not found.", 404, "NOT_FOUND");
     return ok({
