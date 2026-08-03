@@ -33,6 +33,8 @@ import {
   CandidateStatusSelect,
   type StatusOption,
 } from "@/components/candidate/candidate-status-select";
+import { CandidateNotesDialog } from "@/components/candidate/candidate-notes-dialog";
+import type { CrmActorRole } from "@/lib/candidate-crm";
 
 type SortKey = "score" | "name" | "category" | "readiness" | "verification" | "date";
 
@@ -109,10 +111,14 @@ export function RankingTable({
   workspaceId,
   initial,
   statuses = [],
+  currentUserId,
+  currentUserRole,
 }: {
   workspaceId: string;
   initial: RankedCandidateRow[];
   statuses?: StatusOption[];
+  currentUserId: string;
+  currentUserRole: CrmActorRole;
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -122,9 +128,14 @@ export function RankingTable({
   const [search, setSearch] = useState("");
   const [catFilter, setCatFilter] = useState("");
   const [readyFilter, setReadyFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [batchRunning, setBatchRunning] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [notesFor, setNotesFor] = useState<{
+    candidateId: string;
+    candidateName: string;
+  } | null>(null);
   const [duplicateDialog, setDuplicateDialog] = useState<
     (DuplicateConfirmationRequired & { candidateId: string }) | null
   >(null);
@@ -504,6 +515,11 @@ export function RankingTable({
     }
     if (catFilter) list = list.filter((r) => r.match_category === catFilter);
     if (readyFilter) list = list.filter((r) => r.submission_readiness === readyFilter);
+    if (statusFilter === "__none__") {
+      list = list.filter((r) => !r.current_status_id);
+    } else if (statusFilter) {
+      list = list.filter((r) => r.current_status_id === statusFilter);
+    }
 
     const dir = sortDir === "asc" ? 1 : -1;
     list.sort((a, b) => {
@@ -531,7 +547,7 @@ export function RankingTable({
       }
     });
     return list;
-  }, [rows, search, catFilter, readyFilter, sortKey, sortDir]);
+  }, [rows, search, catFilter, readyFilter, statusFilter, sortKey, sortDir]);
 
   const selectedIds = Object.keys(selected).filter((k) => selected[k]);
   const selectedEntries = view
@@ -620,6 +636,22 @@ export function RankingTable({
                 {v}
               </option>
             ))}
+          </select>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="h-8 rounded-lg border border-slate-300 px-2 text-xs"
+            aria-label="Filter by stage"
+          >
+            <option value="">All stages</option>
+            <option value="__none__">No stage</option>
+            {statuses
+              .filter((s) => s.is_active !== false)
+              .map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
           </select>
           <select
             value={`${sortKey}:${sortDir}`}
@@ -778,7 +810,7 @@ export function RankingTable({
                     </Badge>
                   </td>
                   <td className="px-2 py-2">
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <Button
                         size="sm"
                         variant="secondary"
@@ -794,6 +826,23 @@ export function RankingTable({
                             : r.latest_analysis_id
                               ? "Reanalyze"
                               : "Analyze"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          setNotesFor({
+                            candidateId: r.candidate_id,
+                            candidateName: r.full_name || "Unnamed candidate",
+                          })
+                        }
+                      >
+                        Notes
+                        {r.notes_count > 0 ? (
+                          <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-slate-200 px-1 text-[10px] font-semibold text-slate-700">
+                            {r.notes_count}
+                          </span>
+                        ) : null}
                       </Button>
                       <Link
                         href={`/candidates/${r.candidate_id}?w=${workspaceId}`}
@@ -812,6 +861,25 @@ export function RankingTable({
 
       {compareOpen && (
         <CompareDialog entries={selectedEntries} onClose={() => setCompareOpen(false)} />
+      )}
+
+      {notesFor && (
+        <CandidateNotesDialog
+          candidateId={notesFor.candidateId}
+          candidateName={notesFor.candidateName}
+          currentUserId={currentUserId}
+          currentUserRole={currentUserRole}
+          onClose={() => setNotesFor(null)}
+          onNotesChange={(count) => {
+            setRows((prev) =>
+              prev.map((row) =>
+                row.candidate_id === notesFor.candidateId
+                  ? { ...row, notes_count: count }
+                  : row
+              )
+            );
+          }}
+        />
       )}
 
       {duplicateDialog && (

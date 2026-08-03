@@ -97,6 +97,8 @@ export default async function WorkspacePage({
                 workspaceId={ws.id}
                 initial={candidates}
                 statuses={statuses}
+                currentUserId={user.id}
+                currentUserRole={user.role}
               />
             </CardBody>
           </Card>

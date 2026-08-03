@@ -13,11 +13,16 @@ export function CandidateNotesPanel({
   initialNotes,
   currentUserId,
   currentUserRole,
+  framed = true,
+  onNotesChange,
 }: {
   candidateId: string;
   initialNotes: CandidateNoteRow[];
   currentUserId: string;
   currentUserRole: CrmActorRole;
+  /** When false, render without Card chrome (e.g. inside a dialog). */
+  framed?: boolean;
+  onNotesChange?: (count: number) => void;
 }) {
   const [notes, setNotes] = useState(initialNotes);
   const [draft, setDraft] = useState("");
@@ -28,6 +33,14 @@ export function CandidateNotesPanel({
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const { toast } = useToast();
+
+  function updateNotes(updater: (prev: CandidateNoteRow[]) => CandidateNoteRow[]) {
+    setNotes((prev) => {
+      const next = updater(prev);
+      onNotesChange?.(next.length);
+      return next;
+    });
+  }
 
   async function addNote() {
     if (!draft.trim()) {
@@ -46,7 +59,7 @@ export function CandidateNotesPanel({
         toast(data.error ?? "Could not add note.", "error");
         return;
       }
-      setNotes((prev) => [data.note, ...prev]);
+      updateNotes((prev) => [data.note, ...prev]);
       setDraft("");
       toast("Note added.", "success");
     } finally {
@@ -67,7 +80,7 @@ export function CandidateNotesPanel({
         toast(data.error ?? "Could not update note.", "error");
         return;
       }
-      setNotes((prev) => prev.map((n) => (n.id === noteId ? data.note : n)));
+      updateNotes((prev) => prev.map((n) => (n.id === noteId ? data.note : n)));
       setEditingId(null);
       toast("Note updated.", "success");
     } finally {
@@ -89,7 +102,7 @@ export function CandidateNotesPanel({
         toast(data.error ?? "Could not delete note.", "error");
         return;
       }
-      setNotes((prev) => prev.filter((n) => n.id !== deleteTarget.id));
+      updateNotes((prev) => prev.filter((n) => n.id !== deleteTarget.id));
       setDeleteTarget(null);
       toast("Note deleted.", "success");
     } finally {
@@ -97,116 +110,132 @@ export function CandidateNotesPanel({
     }
   }
 
-  return (
-    <Card>
-      <CardHeader title="Notes" description="Visible to recruiters in this workspace." />
-      <CardBody className="space-y-3">
-        <TextArea
-          rows={3}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="Add a note…"
-        />
-        <Button size="sm" disabled={busy || !draft.trim()} onClick={addNote}>
-          Add note
-        </Button>
+  const body = (
+    <div className="space-y-3">
+      <TextArea
+        rows={3}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="Add a note…"
+      />
+      <Button size="sm" disabled={busy || !draft.trim()} onClick={addNote}>
+        Add note
+      </Button>
 
-        <ul className="space-y-3">
-          {notes.length === 0 && (
-            <li className="text-sm text-slate-400">No notes yet.</li>
-          )}
-          {notes.map((note) => {
-            const editable = canEditNote({
-              authorUserId: note.author_user_id,
-              actorUserId: currentUserId,
-              actorRole: currentUserRole,
-            });
-            const edited =
-              new Date(note.updated_at).getTime() - new Date(note.created_at).getTime() > 1000;
-            return (
-              <li key={note.id} className="rounded-lg border border-slate-200 p-3">
-                {editingId === note.id ? (
-                  <div className="space-y-2">
-                    <TextArea
-                      rows={3}
-                      value={editText}
-                      onChange={(e) => setEditText(e.target.value)}
-                    />
-                    <div className="flex gap-2">
-                      <Button size="sm" disabled={busy} onClick={() => saveEdit(note.id)}>
-                        Save
+      <ul className="space-y-3">
+        {notes.length === 0 && (
+          <li className="text-sm text-slate-400">No notes yet.</li>
+        )}
+        {notes.map((note) => {
+          const editable = canEditNote({
+            authorUserId: note.author_user_id,
+            actorUserId: currentUserId,
+            actorRole: currentUserRole,
+          });
+          const edited =
+            new Date(note.updated_at).getTime() - new Date(note.created_at).getTime() > 1000;
+          return (
+            <li key={note.id} className="rounded-lg border border-slate-200 p-3">
+              {editingId === note.id ? (
+                <div className="space-y-2">
+                  <TextArea
+                    rows={3}
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                  />
+                  <div className="flex gap-2">
+                    <Button size="sm" disabled={busy} onClick={() => saveEdit(note.id)}>
+                      Save
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setEditingId(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="whitespace-pre-wrap text-sm text-slate-800">{note.note_text}</p>
+                  <p className="mt-2 text-[11px] text-slate-500">
+                    Added by: {note.author_name || "System migration"}
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Date: {formatTimestamp(note.created_at)}
+                    {edited ? ` · Edited: ${formatTimestamp(note.updated_at)}` : ""}
+                  </p>
+                  {editable && (
+                    <div className="mt-2 flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy || deleting}
+                        onClick={() => {
+                          setEditingId(note.id);
+                          setEditText(note.note_text);
+                        }}
+                      >
+                        Edit
                       </Button>
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => setEditingId(null)}
+                        disabled={busy || deleting}
+                        onClick={() => {
+                          setDeleteError(null);
+                          setDeleteTarget(note);
+                        }}
                       >
-                        Cancel
+                        Delete
                       </Button>
                     </div>
-                  </div>
-                ) : (
-                  <>
-                    <p className="whitespace-pre-wrap text-sm text-slate-800">{note.note_text}</p>
-                    <p className="mt-2 text-[11px] text-slate-500">
-                      Added by: {note.author_name || "System migration"}
-                    </p>
-                    <p className="text-[11px] text-slate-500">
-                      Date: {formatTimestamp(note.created_at)}
-                      {edited ? ` · Edited: ${formatTimestamp(note.updated_at)}` : ""}
-                    </p>
-                    {editable && (
-                      <div className="mt-2 flex gap-2">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy || deleting}
-                          onClick={() => {
-                            setEditingId(note.id);
-                            setEditText(note.note_text);
-                          }}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy || deleting}
-                          onClick={() => {
-                            setDeleteError(null);
-                            setDeleteTarget(note);
-                          }}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </CardBody>
+                  )}
+                </>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 
-      <ConfirmModal
-        isOpen={Boolean(deleteTarget)}
-        title="Delete note?"
-        description="This note will be removed from the candidate profile. The deletion may remain visible in the audit history."
-        confirmLabel="Delete note"
-        confirmLoadingLabel="Deleting…"
-        cancelLabel="Cancel"
-        variant="destructive"
-        isLoading={deleting}
-        error={deleteError}
-        onCancel={() => {
-          if (!deleting) {
-            setDeleteTarget(null);
-            setDeleteError(null);
-          }
-        }}
-        onConfirm={confirmDeleteNote}
-      />
+  const deleteModal = (
+    <ConfirmModal
+      isOpen={Boolean(deleteTarget)}
+      title="Delete note?"
+      description="This note will be removed from the candidate profile. The deletion may remain visible in the audit history."
+      confirmLabel="Delete note"
+      confirmLoadingLabel="Deleting…"
+      cancelLabel="Cancel"
+      variant="destructive"
+      isLoading={deleting}
+      error={deleteError}
+      onCancel={() => {
+        if (!deleting) {
+          setDeleteTarget(null);
+          setDeleteError(null);
+        }
+      }}
+      onConfirm={confirmDeleteNote}
+    />
+  );
+
+  if (!framed) {
+    return (
+      <>
+        {body}
+        {deleteModal}
+      </>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader title="Notes" description="Visible to recruiters in this workspace." />
+      <CardBody>{body}</CardBody>
+      {deleteModal}
     </Card>
   );
 }

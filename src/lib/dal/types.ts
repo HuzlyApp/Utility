@@ -153,6 +153,7 @@ export interface RankedCandidateRow {
   last_status_changed_by_name: string | null;
   last_status_changed_at: string | null;
   assigned_recruiter_name: string | null;
+  notes_count: number;
 }
 
 export interface CandidateNoteRow {

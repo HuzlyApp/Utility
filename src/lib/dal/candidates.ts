@@ -797,6 +797,10 @@ export async function listWorkspaceCandidates(
       COALESCE(sb.full_name, sb.email) AS last_status_changed_by_name,
       c.last_status_changed_at,
       COALESCE(ar.full_name, ar.email) AS assigned_recruiter_name,
+      (
+        SELECT COUNT(*)::int FROM candidate_notes n
+        WHERE n.candidate_id = c.id AND n.tenant_id = c.tenant_id AND n.deleted_at IS NULL
+      ) AS notes_count,
       (SELECT COUNT(*) FROM candidate_match_requirements r
         WHERE r.analysis_id = a.id AND r.requirement_type = 'MANDATORY'
           AND r.requirement_outcome = 'MET') AS mandatory_confirmed,
@@ -849,5 +853,6 @@ export async function listWorkspaceCandidates(
     last_status_changed_by_name: (r.last_status_changed_by_name as string) ?? null,
     last_status_changed_at: (r.last_status_changed_at as string) ?? null,
     assigned_recruiter_name: (r.assigned_recruiter_name as string) ?? null,
+    notes_count: Number(r.notes_count ?? 0),
   }));
 }
