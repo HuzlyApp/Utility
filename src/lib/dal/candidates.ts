@@ -6,6 +6,7 @@ import { getDefaultStatusId, getStatusById } from "./statuses";
 import { AuthError, type AppUser } from "@/lib/auth/session";
 import type { VerifiedRecruiterInputs } from "@/lib/types";
 import { normalizeCandidateName } from "@/lib/duplicate-candidate/normalize";
+import { mapStatusNameToActivityType } from "@/lib/recruiter-activity";
 import type {
   Candidate,
   CandidatePipelineStatus,
@@ -231,7 +232,27 @@ export async function updateCandidateStatus(
       previous_status_id: existing.current_status_id,
       new_status_id: statusId,
     },
+    actorRole: user.role,
+    requestId: `status:${candidateId}:${statusId}:${rows[0].last_status_changed_at}`,
   });
+  const semantic = mapStatusNameToActivityType(next.name);
+  if (semantic) {
+    await logCandidateActivity({
+      tenantId,
+      candidateId,
+      performedByUserId: user.id,
+      actionType: semantic,
+      previousValue: existing.status_name,
+      newValue: next.name,
+      metadata: {
+        previous_status_id: existing.current_status_id,
+        new_status_id: statusId,
+        derived_from: "STATUS_CHANGED",
+      },
+      actorRole: user.role,
+      requestId: `status-semantic:${candidateId}:${statusId}:${rows[0].last_status_changed_at}`,
+    });
+  }
   await audit({
     actorUserId: user.id,
     tenantId,
@@ -302,13 +323,15 @@ export async function assignCandidateRecruiter(
     tenantId,
     candidateId,
     performedByUserId: user.id,
-    actionType: "CANDIDATE_ASSIGNED",
+    actionType: existing.assigned_recruiter_id ? "CANDIDATE_REASSIGNED" : "CANDIDATE_ASSIGNED",
     previousValue: existing.assigned_recruiter_name,
     newValue: newName ?? "Unassigned",
     metadata: {
       previous_recruiter_id: existing.assigned_recruiter_id,
       new_recruiter_id: recruiterUserId,
     },
+    actorRole: user.role,
+    requestId: `assign:${candidateId}:${recruiterUserId ?? "none"}:${Date.now()}`,
   });
   await audit({
     actorUserId: user.id,
@@ -356,8 +379,10 @@ export async function attachCandidateToWorkspace(
     candidateId,
     jobId: workspaceId,
     performedByUserId: user.id,
-    actionType: "CANDIDATE_SUBMITTED_TO_JOB",
+    actionType: "CANDIDATE_ADDED_TO_JOB",
     newValue: workspaceId,
+    actorRole: user.role,
+    requestId: `job-link:${workspaceId}:${candidateId}:${rows[0].id}`,
   });
   return rows[0].id;
 }

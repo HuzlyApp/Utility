@@ -4,6 +4,7 @@ import { audit } from "./audit";
 import { logCandidateActivity } from "./activity";
 import { AuthError, type AppUser } from "@/lib/auth/session";
 import { DASHBOARD_DISPOSITIONS, type DashboardDisposition } from "./types";
+import { mapDispositionToActivityType } from "@/lib/recruiter-activity";
 
 export function isDashboardDisposition(v: string): v is DashboardDisposition {
   return (DASHBOARD_DISPOSITIONS as readonly string[]).includes(v);
@@ -41,14 +42,22 @@ export async function recordDisposition(params: {
     action: "DISPOSITION_RECORDED",
     newValue: { disposition: params.disposition, workspaceId: params.workspaceId },
   });
+  const activityType = mapDispositionToActivityType(params.disposition);
   await logCandidateActivity({
     tenantId,
     candidateId: params.candidateId,
     jobId: params.workspaceId,
     performedByUserId: params.user.id,
-    actionType: "DISPOSITION_UPDATED",
+    actionType: activityType,
     newValue: params.disposition,
-    metadata: { analysis_id: params.analysisId ?? null },
+    analysisId: params.analysisId ?? null,
+    metadata: {
+      analysis_id: params.analysisId ?? null,
+      disposition: params.disposition,
+      raw_action: "DISPOSITION_UPDATED",
+    },
+    actorRole: params.user.role,
+    requestId: `disposition:${rows[0].id}`,
   });
   return rows[0].id;
 }

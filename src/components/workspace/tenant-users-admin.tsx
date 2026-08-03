@@ -270,8 +270,9 @@ export function TenantUsersAdmin({ initial }: { initial: TenantUser[] }) {
             <span className="font-medium text-slate-800">
               {deleteTarget?.full_name ?? deleteTarget?.email ?? "this user"}
             </span>
-            ? This user will no longer be able to sign in. Their previous candidate activity
-            will remain visible.
+            ? This permanently deletes their account and sign-in credentials. Candidate
+            records stay, but this user is removed from assignments and auth. The email can
+            be reused. This cannot be undone.
           </>
         }
         confirmLabel="Delete user"

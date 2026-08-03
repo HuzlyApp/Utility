@@ -126,12 +126,16 @@ export async function saveCandidateAnalysis(
     performedByUserId: user.id,
     actionType: "ANALYSIS_COMPLETED",
     newValue: String(cm.recommended_overall_match_score),
+    analysisId,
     metadata: {
       analysis_id: analysisId,
       ai_provider: provider,
       ai_model: params.model,
       match_category: cm.match_category,
+      match_score: cm.recommended_overall_match_score,
     },
+    actorRole: user.role,
+    requestId: `analysis-complete:${analysisId}`,
   });
 
   if (params.duplicateWarningAcknowledged) {

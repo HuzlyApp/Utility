@@ -13,7 +13,7 @@ import { listScreeningAnswers } from "@/lib/dal/screening";
 import { getLatestDisposition } from "@/lib/dal/dispositions";
 import { listCandidateStatuses } from "@/lib/dal/statuses";
 import { listCandidateNotes } from "@/lib/dal/notes";
-import { listCandidateActivity } from "@/lib/dal/activity";
+import { listCandidateActivity, getCandidateActivitySummary } from "@/lib/dal/activity";
 import { listTenantUsers } from "@/lib/dal/users";
 import { CandidateDetail } from "@/components/candidate/candidate-detail";
 
@@ -43,7 +43,7 @@ export default async function CandidateDetailPage({
     ? await getAnalysis(user, jmc.latest_analysis_id)
     : null;
 
-  const [files, screening, disposition, history, statuses, notes, activity, users] =
+  const [files, screening, disposition, history, statuses, notes, activity, users, activitySummary] =
     await Promise.all([
       listEntityFiles(user, "candidate", params.candidateId),
       workspaceId
@@ -57,6 +57,7 @@ export default async function CandidateDetailPage({
       listCandidateNotes(user, params.candidateId),
       listCandidateActivity(user, params.candidateId),
       listTenantUsers(user.tenantId),
+      getCandidateActivitySummary(user, params.candidateId),
     ]);
 
   const recruiters = users.filter(
@@ -104,6 +105,11 @@ export default async function CandidateDetailPage({
           last_status_changed_at: candidate.last_status_changed_at,
           created_at: candidate.created_at,
           updated_at: candidate.updated_at,
+          activitySummary: {
+            recruiterCount: activitySummary.recruiterCount,
+            lastActivityAt: activitySummary.lastActivityAt,
+            lastActivityByName: activitySummary.lastActivityByName,
+          },
         }}
         workspaceId={workspaceId}
         jobTitle={workspace?.job_title ?? null}

@@ -128,8 +128,10 @@ export async function setUserStatus(params: {
 }
 
 /**
- * Soft-deletes a tenant user (ARCHIVED). Blocks self-delete and deleting the
- * last active tenant admin. Login is already denied for non-ACTIVE statuses.
+ * Permanently deletes a tenant user from app + Neon Auth.
+ * Clears relational user links in the tenant, removes credentials/sessions,
+ * and deletes the profile so the email can be reused.
+ * Candidate/job records are kept; actor fields are nulled.
  */
 export async function deleteTenantUser(params: {
   actor: AppUser;
@@ -159,11 +161,8 @@ export async function deleteTenantUser(params: {
   if (!target) {
     throw new Error("User not found.");
   }
-  if (target.status === "ARCHIVED") {
-    throw new Error("User is already deleted.");
-  }
 
-  if (target.role === "TENANT_ADMIN") {
+  if (target.role === "TENANT_ADMIN" && target.status === "ACTIVE") {
     const admins = (await sql`
       SELECT COUNT(*)::int AS count
       FROM user_profiles
@@ -172,25 +171,23 @@ export async function deleteTenantUser(params: {
         AND status = 'ACTIVE'
         AND user_id <> ${params.userId}
     `) as { count: number }[];
-    if (Number(admins[0]?.count ?? 0) < 1 && target.status === "ACTIVE") {
+    if (Number(admins[0]?.count ?? 0) < 1) {
       throw new Error(
         "Cannot delete the last active tenant admin. Promote another admin first."
       );
     }
   }
 
-  await sql`
-    UPDATE user_profiles
-    SET status = 'ARCHIVED', updated_at = now()
-    WHERE user_id = ${params.userId} AND tenant_id = ${params.tenantId}
-  `;
+  const userId = params.userId;
+  const email = (target.email ?? "").trim().toLowerCase();
 
+  // Audit before the profile row disappears.
   await audit({
     actorUserId: params.actor.id,
     tenantId: params.tenantId,
     entityType: "user",
-    entityId: params.userId,
-    action: "USER_DELETED",
+    entityId: userId,
+    action: "USER_HARD_DELETED",
     previousValue: {
       email: target.email,
       full_name: target.full_name,
@@ -198,10 +195,91 @@ export async function deleteTenantUser(params: {
       status: target.status,
     },
     newValue: {
-      status: "ARCHIVED",
+      hard_deleted: true,
       admin_name: params.actor.name,
     },
   });
+
+  await sql.transaction((tx) => [
+    tx`
+      UPDATE candidates
+      SET assigned_recruiter_id = NULL, updated_at = now()
+      WHERE tenant_id = ${params.tenantId}
+        AND assigned_recruiter_id = ${userId}
+    `,
+    tx`
+      UPDATE candidates
+      SET updated_by_user_id = NULL
+      WHERE tenant_id = ${params.tenantId}
+        AND updated_by_user_id = ${userId}
+    `,
+    tx`
+      UPDATE candidates
+      SET last_status_changed_by_user_id = NULL
+      WHERE tenant_id = ${params.tenantId}
+        AND last_status_changed_by_user_id = ${userId}
+    `,
+    tx`
+      UPDATE candidates
+      SET created_by_user_id = NULL
+      WHERE tenant_id = ${params.tenantId}
+        AND created_by_user_id = ${userId}
+    `,
+    tx`
+      UPDATE candidate_notes
+      SET author_user_id = NULL
+      WHERE tenant_id = ${params.tenantId}
+        AND author_user_id = ${userId}
+    `,
+    tx`
+      UPDATE candidate_notes
+      SET deleted_by_user_id = NULL
+      WHERE tenant_id = ${params.tenantId}
+        AND deleted_by_user_id = ${userId}
+    `,
+    tx`
+      UPDATE candidate_activity_logs
+      SET performed_by_user_id = NULL
+      WHERE tenant_id = ${params.tenantId}
+        AND performed_by_user_id = ${userId}
+    `,
+    tx`
+      UPDATE candidate_statuses
+      SET created_by_user_id = NULL
+      WHERE tenant_id = ${params.tenantId}
+        AND created_by_user_id = ${userId}
+    `,
+    tx`
+      UPDATE recruiter_dispositions
+      SET decided_by = NULL
+      WHERE decided_by = ${userId}
+        AND workspace_id IN (
+          SELECT id FROM job_match_workspaces WHERE tenant_id = ${params.tenantId}
+        )
+    `,
+    tx`DELETE FROM neon_auth.session WHERE "userId" = ${userId}`,
+    tx`DELETE FROM neon_auth.account WHERE "userId" = ${userId}`,
+    tx`DELETE FROM neon_auth.member WHERE "userId" = ${userId}`,
+    tx`DELETE FROM neon_auth.invitation WHERE "inviterId" = ${userId}`,
+    tx`DELETE FROM neon_auth.invitation WHERE ${email} <> '' AND lower(email) = ${email}`,
+    tx`DELETE FROM neon_auth.verification WHERE ${email} <> '' AND lower(identifier) = ${email}`,
+    tx`DELETE FROM neon_auth."user" WHERE id = ${userId}`,
+    tx`
+      DELETE FROM user_profiles
+      WHERE user_id = ${userId}
+        AND tenant_id = ${params.tenantId}
+    `,
+  ]);
+
+  // Optional table from job-cache schema — ignore if not applied yet.
+  try {
+    await sql`
+      DELETE FROM analysis_in_flight
+      WHERE user_id = ${userId}
+    `;
+  } catch {
+    /* relation may not exist */
+  }
 
   return {
     deleted: true,

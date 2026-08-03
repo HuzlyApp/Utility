@@ -57,6 +57,7 @@ import {
   type AssigneeOption,
 } from "@/components/candidate/candidate-assignment-select";
 import { formatTimestamp } from "@/lib/client/candidate-crm";
+import { formatRelativeTime } from "@/lib/recruiter-activity";
 import type { CandidateNoteRow, CandidateActivityRow } from "@/lib/dal/types";
 import type { CrmActorRole } from "@/lib/candidate-crm";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -83,6 +84,11 @@ interface CandidateProps {
   last_status_changed_at: string | null;
   created_at: string;
   updated_at: string;
+  activitySummary?: {
+    recruiterCount: number;
+    lastActivityAt: string | null;
+    lastActivityByName: string | null;
+  } | null;
 }
 
 interface AnalysisProps {
@@ -604,6 +610,18 @@ export function CandidateDetail({
                   Last updated by: {candidate.updated_by_name || "—"}
                   {candidate.updated_at ? ` · ${formatTimestamp(candidate.updated_at)}` : ""}
                 </p>
+                {candidate.activitySummary && (
+                  <p className="text-[11px] text-slate-500">
+                    Worked on by {candidate.activitySummary.recruiterCount} recruiter
+                    {candidate.activitySummary.recruiterCount === 1 ? "" : "s"}
+                    {candidate.activitySummary.lastActivityByName
+                      ? ` · Last activity by ${candidate.activitySummary.lastActivityByName}`
+                      : ""}
+                    {candidate.activitySummary.lastActivityAt
+                      ? `, ${formatRelativeTime(candidate.activitySummary.lastActivityAt)}`
+                      : ""}
+                  </p>
+                )}
               </div>
               {cm && (
                 <div className="mt-2 flex flex-wrap items-center gap-2">

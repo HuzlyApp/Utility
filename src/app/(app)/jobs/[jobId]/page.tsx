@@ -8,7 +8,7 @@ import { Card, CardBody, CardHeader, Badge } from "@/components/ui/primitives";
 import { DeleteJobButton } from "@/components/jobs/delete-job-button";
 import { AddCandidates } from "@/components/workspace/add-candidates";
 import { RankingTable } from "@/components/workspace/ranking-table";
-import { JobDescriptionPanel } from "@/components/workspace/job-description-panel";
+import { JobWorkspaceLayout } from "@/components/workspace/job-workspace-layout";
 import { jobRoutes } from "@/lib/routes";
 
 export const dynamic = "force-dynamic";
@@ -81,76 +81,43 @@ export default async function WorkspacePage({
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="min-w-0 space-y-6">
-          <div id="add-candidates">
-            <AddCandidates workspaceId={ws.id} />
-          </div>
+      <JobWorkspaceLayout
+        userId={user.id}
+        main={
+          <>
+            <div id="add-candidates">
+              <AddCandidates workspaceId={ws.id} />
+            </div>
 
-          <Card>
-            <CardHeader
-              title="Candidate ranking"
-              description="Sorted best-first. Analyze ready candidates, then compare and decide."
-            />
-            <CardBody>
-              <RankingTable
-                workspaceId={ws.id}
-                initial={candidates}
-                statuses={statuses}
-                currentUserId={user.id}
-                currentUserRole={user.role}
-              />
-            </CardBody>
-          </Card>
-        </div>
-
-        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-1">
-          <Card>
-            <CardHeader title="Job summary" />
-            <CardBody className="space-y-2 text-sm">
-              <SummaryRow label="Specialty" value={sr.specialty || ws.specialty} />
-              <SummaryRow label="Department" value={ws.department} />
-              <SummaryRow label="Location" value={ws.location} />
-              <SummaryRow label="Shift" value={ws.shift} />
-              <SummaryRow label="Start date" value={ws.start_date} />
-              <SummaryRow label="Candidates" value={String(candidates.length)} />
-            </CardBody>
-          </Card>
-
-          {(sr.mandatory_requirements || sr.preferred_requirements) && (
             <Card>
-              <CardHeader title="Saved requirements" />
-              <CardBody className="space-y-3 text-sm">
-                {sr.mandatory_requirements && (
-                  <div>
-                    <p className="mb-1 text-xs font-semibold uppercase text-slate-500">Mandatory</p>
-                    <p className="whitespace-pre-line break-words text-slate-700">{sr.mandatory_requirements}</p>
-                  </div>
-                )}
-                {sr.preferred_requirements && (
-                  <div>
-                    <p className="mb-1 text-xs font-semibold uppercase text-slate-500">Preferred</p>
-                    <p className="whitespace-pre-line break-words text-slate-700">{sr.preferred_requirements}</p>
-                  </div>
-                )}
+              <CardHeader
+                title="Candidate ranking"
+                description="Sorted best-first. Analyze ready candidates, then compare and decide."
+              />
+              <CardBody>
+                <RankingTable
+                  workspaceId={ws.id}
+                  initial={candidates}
+                  statuses={statuses}
+                  currentUserId={user.id}
+                  currentUserRole={user.role}
+                />
               </CardBody>
             </Card>
-          )}
-
-          <JobDescriptionPanel text={ws.job_description_text ?? ""} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SummaryRow({ label, value }: { label: string; value?: string | null }) {
-  return (
-    <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-      <span className="text-slate-400">{label}</span>
-      <span className="break-words font-medium text-slate-700 sm:text-right">
-        {value || "—"}
-      </span>
+          </>
+        }
+        sidebar={{
+          specialty: sr.specialty || ws.specialty,
+          department: ws.department,
+          location: ws.location,
+          shift: ws.shift,
+          startDate: ws.start_date,
+          candidateCount: candidates.length,
+          mandatoryRequirements: sr.mandatory_requirements,
+          preferredRequirements: sr.preferred_requirements,
+          jobDescriptionText: ws.job_description_text ?? "",
+        }}
+      />
     </div>
   );
 }

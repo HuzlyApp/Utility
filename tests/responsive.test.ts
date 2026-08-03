@@ -153,20 +153,32 @@ describe("dense data tables", () => {
 });
 
 describe("job workspace page layout (/jobs/[jobId])", () => {
+  const LAYOUT = readSrc("src/components/workspace/job-workspace-layout.tsx");
+
   it("keeps the two-column desktop layout only at xl (1280px+) with a bounded main column", () => {
-    expect(JOB_PAGE).toContain("xl:grid-cols-[minmax(0,1fr)_320px]");
-    expect(JOB_PAGE).toContain("min-w-0");
+    expect(LAYOUT).toContain("xl:grid-cols-[minmax(0,1fr)_auto]");
+    expect(LAYOUT).toContain("min-w-0");
+    expect(LAYOUT).toContain("w-[320px]");
+  });
+
+  it("supports collapsing the job details sidebar into a narrow rail", () => {
+    expect(LAYOUT).toContain("Collapse job details");
+    expect(LAYOUT).toContain("Expand job details");
+    expect(LAYOUT).toContain("aria-expanded");
+    expect(LAYOUT).toContain("aria-controls");
+    expect(LAYOUT).toContain("w-10");
   });
 
   it("reflows the job summary / description panels below the candidates on tablet and mobile", () => {
-    // Right-rail panels become a 2-col grid on tablet and stack on mobile.
-    expect(JOB_PAGE).toContain("md:grid-cols-2");
-    expect(JOB_PAGE).toContain("xl:grid-cols-1");
+    expect(LAYOUT).toContain("md:grid-cols-2");
+    expect(LAYOUT).toContain("xl:grid-cols-1");
+    expect(LAYOUT).toContain("md:hidden");
+    expect(LAYOUT).toContain("hidden md:block xl:hidden");
   });
 
   it("stacks job summary label/value rows on mobile instead of crowding one line", () => {
-    expect(JOB_PAGE).toContain("flex-col gap-0.5 sm:flex-row");
-    expect(JOB_PAGE).toContain("break-words");
+    expect(LAYOUT).toContain("flex-col gap-0.5 sm:flex-row");
+    expect(LAYOUT).toContain("break-words");
   });
 
   it("uses touch-friendly header action buttons", () => {

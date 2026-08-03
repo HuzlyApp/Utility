@@ -89,6 +89,9 @@ export async function createCandidateNote(
     performedByUserId: user.id,
     actionType: "NOTE_ADDED",
     newValue: text.slice(0, 200),
+    noteId: rows[0].id,
+    actorRole: user.role,
+    requestId: `note-add:${rows[0].id}`,
   });
   await audit({
     actorUserId: user.id,

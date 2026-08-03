@@ -78,8 +78,7 @@ export async function DELETE(
       if (
         message.includes("own account") ||
         message.includes("last active") ||
-        message.includes("not found") ||
-        message.includes("already deleted")
+        message.includes("not found")
       ) {
         const status = message.includes("not found") ? 404 : 400;
         return fail(message, status, status === 404 ? "NOT_FOUND" : "DELETE_BLOCKED");

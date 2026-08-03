@@ -26,6 +26,7 @@ export const config = {
     "/jobs/:path*",
     "/candidates/:path*",
     "/users/:path*",
+    "/recruiter-activity/:path*",
     "/analyses/:path*",
     "/reports/:path*",
     "/settings/:path*",

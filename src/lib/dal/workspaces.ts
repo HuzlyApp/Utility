@@ -1,6 +1,7 @@
 import "server-only";
 import { getSql } from "./client";
 import { audit } from "./audit";
+import { logActivity } from "./activity";
 import type { AppUser } from "@/lib/auth/session";
 import type { StructuredJobFields } from "@/lib/types";
 import type { JobStatus, Workspace, WorkspaceSummary } from "./types";
@@ -56,6 +57,15 @@ export async function createWorkspace(
     entityId: id,
     action: "WORKSPACE_CREATED",
     newValue: { job_title: input.job_title, job_ref: input.job_ref },
+  });
+  await logActivity({
+    tenantId,
+    performedByUserId: user.id,
+    actionType: "JOB_CREATED",
+    jobId: id,
+    newValue: input.job_title ?? input.job_ref ?? id,
+    actorRole: user.role,
+    requestId: `job-created:${id}`,
   });
   return id;
 }
@@ -138,6 +148,14 @@ export async function updateWorkspace(
     entityId: id,
     action: "WORKSPACE_UPDATED",
   });
+  await logActivity({
+    tenantId,
+    performedByUserId: user.id,
+    actionType: "JOB_EDITED",
+    jobId: id,
+    newValue: input.job_title ?? existing.job_title ?? id,
+    actorRole: user.role,
+  });
   return true;
 }
 
@@ -160,6 +178,15 @@ export async function setWorkspaceStatus(
     entityType: "job_workspace",
     entityId: id,
     action: status === "ARCHIVED" ? "WORKSPACE_ARCHIVED" : "WORKSPACE_RESTORED",
+  });
+  await logActivity({
+    tenantId,
+    performedByUserId: user.id,
+    actionType: status === "ARCHIVED" ? "JOB_ARCHIVED" : "JOB_REOPENED",
+    jobId: id,
+    newValue: existing.job_title ?? id,
+    actorRole: user.role,
+    requestId: `job-status:${id}:${status}:${Date.now()}`,
   });
   return true;
 }

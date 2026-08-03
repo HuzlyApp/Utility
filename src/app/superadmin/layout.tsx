@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 const NAV_ITEMS = [
   { href: "/superadmin", label: "Overview" },
   { href: "/superadmin/tenants", label: "Tenants" },
+  { href: "/superadmin/recruiter-activity", label: "Recruiter Activity" },
 ];
 
 export default async function SuperAdminLayout({
@@ -44,6 +45,12 @@ export default async function SuperAdminLayout({
                 className="shrink-0 text-brand-700 hover:underline"
               >
                 Tenants
+              </Link>
+              <Link
+                href="/superadmin/recruiter-activity"
+                className="shrink-0 text-brand-700 hover:underline"
+              >
+                Recruiter Activity
               </Link>
             </nav>
           </div>

@@ -25,6 +25,7 @@ function isNavActive(href: string, pathname: string): boolean {
     );
   }
   if (href === "/candidates") return pathname.startsWith("/candidates");
+  if (href === "/recruiter-activity") return pathname.startsWith("/recruiter-activity");
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -53,6 +54,9 @@ export function AppHeader({
 
   const nav = [
     ...BASE_NAV,
+    ...(role === "TENANT_ADMIN" || role === "RECRUITER"
+      ? [{ href: "/recruiter-activity", label: "Recruiter Activity" }]
+      : []),
     ...(role === "TENANT_ADMIN" ? [{ href: "/users", label: "Users" }] : []),
     ...(role === "TENANT_ADMIN" ? [{ href: "/settings", label: "Settings" }] : []),
   ];

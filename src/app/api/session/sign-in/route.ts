@@ -3,7 +3,9 @@ import { auth } from "@/lib/auth/server";
 import { ok, fail, logServerError } from "@/lib/http";
 import { getSql } from "@/lib/dal/client";
 import { audit } from "@/lib/dal/audit";
+import { logActivity } from "@/lib/dal/activity";
 import { ensureDefaultSuperAdmin } from "@/lib/auth/superadmin-seed";
+import type { AppRole } from "@/lib/auth/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,6 +67,21 @@ export async function POST(req: NextRequest) {
         entityId: user.id,
         action: "LOGIN_SUCCEEDED",
       });
+      if (profile?.tenant_id) {
+        await logActivity({
+          tenantId: profile.tenant_id,
+          performedByUserId: user.id,
+          actionType: "USER_LOGIN",
+          source:
+            profile.role === "TENANT_ADMIN"
+              ? "tenant_admin"
+              : profile.role === "SUPER_ADMIN"
+                ? "super_admin"
+                : "recruiter",
+          actorRole: profile.role as AppRole,
+          requestId: `login:${user.id}:${new Date().toISOString().slice(0, 16)}`,
+        });
+      }
     }
     return ok({});
   } catch (err) {
