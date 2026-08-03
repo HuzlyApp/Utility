@@ -4,7 +4,12 @@ import { withTenantUser } from "@/lib/api-helpers";
 import { fail, ok, logServerError } from "@/lib/http";
 import { getAnalysis, replaceAnalysisWithUpdatedResume } from "@/lib/dal/analyses";
 import { getWorkspace } from "@/lib/dal/workspaces";
-import { getCandidate, getJobCandidate, setJobCandidateStatus } from "@/lib/dal/candidates";
+import {
+  getCandidate,
+  getJobCandidate,
+  releaseResumeUpdateLock,
+  setJobCandidateStatus,
+} from "@/lib/dal/candidates";
 import { extractFromUpload, validateUpload } from "@/lib/files";
 import { detectCandidateNameFromResumeText, namesMatch } from "@/lib/resume-name";
 import { performAnalysis } from "@/lib/analyze";
@@ -16,6 +21,8 @@ import type { AnalyzeRequestBody } from "@/lib/types";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
+
+const STALE_UPDATE_MS = 5 * 60 * 1000;
 
 const LOCKED_STATUSES = new Set([
   "ANALYZING",
@@ -46,11 +53,27 @@ export async function POST(
 
     const jmc = await getJobCandidate(user, analysis.workspace_id, analysis.candidate_id);
     if (!jmc) return fail("Candidate is not attached to this workspace.", 404, "NOT_ATTACHED");
-    if (LOCKED_STATUSES.has(jmc.status)) {
-      return fail("A resume update or analysis is already in progress.", 409, "ALREADY_UPDATING");
-    }
 
     const form = await req.formData();
+    const forceRetry = String(form.get("force_retry") ?? "") === "true";
+
+    if (LOCKED_STATUSES.has(jmc.status)) {
+      const lockedForMs = Date.now() - new Date(jmc.updated_at).getTime();
+      const isStale = lockedForMs > STALE_UPDATE_MS;
+      if (forceRetry || isStale) {
+        await releaseResumeUpdateLock(user, jmc.id, {
+          force: forceRetry,
+          staleAfterMs: STALE_UPDATE_MS,
+        });
+      } else {
+        return fail(
+          "A resume update or analysis is already in progress. Wait for it to finish, or retry in a few minutes.",
+          409,
+          "ALREADY_UPDATING"
+        );
+      }
+    }
+
     const file = form.get("file");
     if (!(file instanceof File)) {
       return fail("Please choose a resume file.", 400, "NO_FILE");

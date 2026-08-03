@@ -22,6 +22,7 @@ export async function updateResumeAndReanalyze(options: {
   modelOptionId?: string;
   continueNameMismatch?: boolean;
   candidateNameDecision?: "keep" | "replace";
+  forceRetry?: boolean;
 }): Promise<Record<string, unknown>> {
   const form = new FormData();
   form.set("file", options.file);
@@ -30,12 +31,25 @@ export async function updateResumeAndReanalyze(options: {
   if (options.candidateNameDecision) {
     form.set("candidate_name_decision", options.candidateNameDecision);
   }
+  if (options.forceRetry) form.set("force_retry", "true");
 
   const res = await fetch(`/api/candidate-match/${options.analysisId}/update-resume`, {
     method: "POST",
     body: form,
   });
-  const data = (await res.json()) as Record<string, unknown>;
+
+  let data: Record<string, unknown> = {};
+  try {
+    data = (await res.json()) as Record<string, unknown>;
+  } catch {
+    throw new ResumeUpdateError(
+      res.ok
+        ? "Unexpected response from server."
+        : `Resume update failed (HTTP ${res.status}). Please try again.`,
+      "INVALID_RESPONSE"
+    );
+  }
+
   if (!res.ok || data.success === false) {
     throw new ResumeUpdateError(String(data.error ?? "Resume update failed."), String(data.code ?? ""), {
       detectedName: typeof data.detected_name === "string" ? data.detected_name : undefined,

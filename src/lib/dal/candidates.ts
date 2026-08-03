@@ -206,6 +206,54 @@ export async function releaseAnalyzingLock(
   return rows.length > 0;
 }
 
+/** Release a stuck resume-update / reanalyze lock after crash, timeout, or retry. */
+export async function releaseResumeUpdateLock(
+  user: AppUser,
+  jobMatchCandidateId: string,
+  options: { force?: boolean; staleAfterMs?: number } = {}
+): Promise<boolean> {
+  const sql = getSql();
+  const tenantId = tenantIdOf(user);
+  const staleAfterMs = options.staleAfterMs ?? 5 * 60 * 1000;
+
+  if (options.force) {
+    const rows = (await sql`
+      UPDATE job_match_candidates
+      SET status = 'UPDATE_FAILED', updated_at = now()
+      WHERE id = ${jobMatchCandidateId}
+        AND workspace_id IN (SELECT id FROM job_match_workspaces WHERE tenant_id = ${tenantId})
+        AND status IN (
+          'UPDATE_PENDING',
+          'EXTRACTING_UPDATED_RESUME',
+          'REANALYZING',
+          'VALIDATING',
+          'SAVING',
+          'ANALYZING'
+        )
+      RETURNING id
+    `) as { id: string }[];
+    return rows.length > 0;
+  }
+
+  const rows = (await sql`
+    UPDATE job_match_candidates
+    SET status = 'UPDATE_FAILED', updated_at = now()
+    WHERE id = ${jobMatchCandidateId}
+      AND workspace_id IN (SELECT id FROM job_match_workspaces WHERE tenant_id = ${tenantId})
+      AND status IN (
+        'UPDATE_PENDING',
+        'EXTRACTING_UPDATED_RESUME',
+        'REANALYZING',
+        'VALIDATING',
+        'SAVING',
+        'ANALYZING'
+      )
+      AND updated_at < now() - (${staleAfterMs} * interval '1 millisecond')
+    RETURNING id
+  `) as { id: string }[];
+  return rows.length > 0;
+}
+
 export async function setJobCandidateStatus(
   user: AppUser,
   jobMatchCandidateId: string,

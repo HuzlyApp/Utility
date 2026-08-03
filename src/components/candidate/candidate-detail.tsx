@@ -44,7 +44,10 @@ import {
 import type { DuplicateConfirmationRequired } from "@/lib/duplicate-candidate/messages";
 import { DuplicateWarningDialog } from "@/components/workspace/duplicate-warning-dialog";
 import { notifyWorkspaceCandidatesChanged } from "@/lib/workspace-events";
-import { UpdateResumeDialog } from "@/components/candidate/update-resume-dialog";
+import {
+  UpdateResumeDialog,
+  type ResumeUpdateProgress,
+} from "@/components/candidate/update-resume-dialog";
 import { updateResumeAndReanalyze, ResumeUpdateError } from "@/lib/client/update-resume";
 
 interface CandidateProps {
@@ -135,12 +138,17 @@ export function CandidateDetail({
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [updatingResume, setUpdatingResume] = useState(false);
+  const [resumeUpdateProgress, setResumeUpdateProgress] =
+    useState<ResumeUpdateProgress | null>(null);
+  const [resumeUpdateError, setResumeUpdateError] = useState<string | null>(null);
+  const [forceResumeRetry, setForceResumeRetry] = useState(false);
   const [nameMismatch, setNameMismatch] = useState<{
     detectedName: string;
     existingName: string;
   } | null>(null);
   const [nameDecision, setNameDecision] = useState<"keep" | "replace">("keep");
   const duplicateResolverRef = React.useRef<((continued: boolean) => void) | null>(null);
+  const resumeProgressTimersRef = React.useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Reconcile local form state when the server props refresh after save/reanalyze.
   React.useEffect(() => {
@@ -276,9 +284,60 @@ export function CandidateDetail({
     }
   }
 
+  function clearResumeProgressTimers() {
+    for (const timer of resumeProgressTimersRef.current) clearTimeout(timer);
+    resumeProgressTimersRef.current = [];
+  }
+
+  function startResumeProgressEstimate() {
+    clearResumeProgressTimers();
+    setResumeUpdateProgress({
+      stage: "uploading",
+      percent: 12,
+      label: "Uploading resume…",
+    });
+    resumeProgressTimersRef.current.push(
+      setTimeout(() => {
+        setResumeUpdateProgress({
+          stage: "extracting",
+          percent: 30,
+          label: "Extracting resume text…",
+        });
+      }, 1200),
+      setTimeout(() => {
+        setResumeUpdateProgress({
+          stage: "analyzing",
+          percent: 55,
+          label: "Reanalyzing with AI…",
+          indeterminate: true,
+        });
+      }, 3500),
+      setTimeout(() => {
+        setResumeUpdateProgress({
+          stage: "saving",
+          percent: 88,
+          label: "Saving updated resume and analysis…",
+        });
+      }, 90_000)
+    );
+  }
+
+  function resetResumeUpdateDialogState() {
+    clearResumeProgressTimers();
+    setUpdateDialogOpen(false);
+    setResumeFile(null);
+    setNameMismatch(null);
+    setResumeUpdateProgress(null);
+    setResumeUpdateError(null);
+    setForceResumeRetry(false);
+    setNameDecision("keep");
+  }
+
   async function runResumeUpdate(continueMismatch = false) {
     if (!analysis?.id || !resumeFile) return;
     setUpdatingResume(true);
+    setResumeUpdateError(null);
+    startResumeProgressEstimate();
     try {
       await updateResumeAndReanalyze({
         analysisId: analysis.id,
@@ -286,14 +345,23 @@ export function CandidateDetail({
         modelOptionId: optionId,
         continueNameMismatch: continueMismatch,
         candidateNameDecision: nameDecision,
+        forceRetry: forceResumeRetry,
       });
-      setUpdateDialogOpen(false);
-      setResumeFile(null);
-      setNameMismatch(null);
+      clearResumeProgressTimers();
+      setForceResumeRetry(false);
+      setResumeUpdateProgress({
+        stage: "completed",
+        percent: 100,
+        label: "Resume updated and analysis completed",
+      });
       toast("Resume updated and analysis rerun.", "success");
       if (workspaceId) notifyWorkspaceCandidatesChanged(workspaceId);
+      // Brief success state so the user sees confirmation before the dialog closes.
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      resetResumeUpdateDialogState();
       router.refresh();
     } catch (err) {
+      clearResumeProgressTimers();
       if (
         err instanceof ResumeUpdateError &&
         err.code === "RESUME_NAME_MISMATCH" &&
@@ -304,16 +372,39 @@ export function CandidateDetail({
           detectedName: err.detectedName,
           existingName: err.existingName,
         });
+        setResumeUpdateProgress(null);
+        setResumeUpdateError(null);
         toast("Name mismatch detected. Confirm to continue.", "error");
         return;
       }
       const message =
         err instanceof ResumeUpdateError ? err.message : "Could not update resume.";
+      if (err instanceof ResumeUpdateError && err.code === "ALREADY_UPDATING") {
+        setForceResumeRetry(true);
+        setResumeUpdateProgress({
+          stage: "failed",
+          percent: 0,
+          label: "Resume update failed",
+        });
+        setResumeUpdateError(`${message} Click Retry to force a new attempt.`);
+        toast(message, "error");
+        return;
+      }
+      setResumeUpdateProgress({
+        stage: "failed",
+        percent: 0,
+        label: "Resume update failed",
+      });
+      setResumeUpdateError(message);
       toast(message, "error");
     } finally {
       setUpdatingResume(false);
     }
   }
+
+  React.useEffect(() => {
+    return () => clearResumeProgressTimers();
+  }, []);
 
   function handleDuplicateContinue() {
     duplicateResolverRef.current?.(true);
@@ -697,6 +788,9 @@ export function CandidateDetail({
                   setUpdateDialogOpen(true);
                   setNameMismatch(null);
                   setNameDecision("keep");
+                  setResumeUpdateProgress(null);
+                  setResumeUpdateError(null);
+                  setForceResumeRetry(false);
                 }}
                 disabled={updatingResume || reanalyzing}
                 className="rounded-lg border border-brand-300 px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -738,14 +832,15 @@ export function CandidateDetail({
         selectedFileName={resumeFile?.name ?? null}
         mismatch={nameMismatch}
         nameDecision={nameDecision}
-        onClose={() => {
-          setUpdateDialogOpen(false);
-          setResumeFile(null);
-          setNameMismatch(null);
-        }}
+        progress={resumeUpdateProgress}
+        error={resumeUpdateError}
+        onClose={resetResumeUpdateDialogState}
         onPickFile={(file) => {
           setResumeFile(file);
           setNameMismatch(null);
+          setResumeUpdateProgress(null);
+          setResumeUpdateError(null);
+          setForceResumeRetry(false);
         }}
         onSubmit={() => runResumeUpdate(false)}
         onContinueMismatch={() => runResumeUpdate(true)}
