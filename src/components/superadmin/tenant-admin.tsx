@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Button, TextInput } from "@/components/ui/primitives";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 
 interface TenantRow {
   id: string;
@@ -16,10 +17,18 @@ interface TenantRow {
   last_activity_at: string | null;
 }
 
+type PendingAction = {
+  tenant: TenantRow;
+  status: "SUSPENDED" | "ARCHIVED";
+};
+
 export function TenantAdmin({ initial }: { initial: TenantRow[] }) {
   const [rows, setRows] = useState<TenantRow[]>(initial);
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [form, setForm] = useState({
     tenant_name: "",
     tenant_slug: "",
@@ -66,13 +75,25 @@ export function TenantAdmin({ initial }: { initial: TenantRow[] }) {
     }
   }
 
-  async function setStatus(tenantId: string, status: "ACTIVE" | "SUSPENDED" | "ARCHIVED") {
-    const res = await fetch(`/api/superadmin/tenants/${tenantId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    if (res.ok) await refresh();
+  async function applyStatus(tenantId: string, status: "ACTIVE" | "SUSPENDED" | "ARCHIVED") {
+    setBusy(true);
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/superadmin/tenants/${tenantId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setActionError(data.error ?? "Could not update tenant status.");
+        return;
+      }
+      setPending(null);
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -145,13 +166,34 @@ export function TenantAdmin({ initial }: { initial: TenantRow[] }) {
                   <p className="text-xs text-slate-500">{t.slug}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => setStatus(t.id, "ACTIVE")}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => void applyStatus(t.id, "ACTIVE")}
+                  >
                     Reactivate
                   </Button>
-                  <Button size="sm" variant="secondary" onClick={() => setStatus(t.id, "SUSPENDED")}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => {
+                      setActionError(null);
+                      setPending({ tenant: t, status: "SUSPENDED" });
+                    }}
+                  >
                     Suspend
                   </Button>
-                  <Button size="sm" variant="danger" onClick={() => setStatus(t.id, "ARCHIVED")}>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={busy}
+                    onClick={() => {
+                      setActionError(null);
+                      setPending({ tenant: t, status: "ARCHIVED" });
+                    }}
+                  >
                     Archive
                   </Button>
                 </div>
@@ -164,6 +206,53 @@ export function TenantAdmin({ initial }: { initial: TenantRow[] }) {
           ))}
         </div>
       </section>
+
+      <ConfirmModal
+        isOpen={Boolean(pending)}
+        title={
+          pending?.status === "ARCHIVED"
+            ? "Archive tenant workspace?"
+            : "Suspend tenant workspace?"
+        }
+        description={
+          pending?.status === "ARCHIVED" ? (
+            <>
+              Archive{" "}
+              <span className="font-medium text-slate-800">
+                {pending.tenant.name}
+              </span>
+              ? Users in this tenant will lose access. Existing jobs, candidates, and
+              analyses remain in the database.
+            </>
+          ) : (
+            <>
+              Suspend{" "}
+              <span className="font-medium text-slate-800">
+                {pending?.tenant.name}
+              </span>
+              ? Users in this tenant will no longer be able to sign in until the tenant is
+              reactivated. Existing data remains intact.
+            </>
+          )
+        }
+        confirmLabel={pending?.status === "ARCHIVED" ? "Archive tenant" : "Suspend tenant"}
+        confirmLoadingLabel={
+          pending?.status === "ARCHIVED" ? "Archiving…" : "Suspending…"
+        }
+        cancelLabel="Cancel"
+        variant={pending?.status === "ARCHIVED" ? "destructive" : "warning"}
+        isLoading={busy}
+        error={actionError}
+        onCancel={() => {
+          if (!busy) {
+            setPending(null);
+            setActionError(null);
+          }
+        }}
+        onConfirm={() => {
+          if (pending) void applyStatus(pending.tenant.id, pending.status);
+        }}
+      />
     </div>
   );
 }

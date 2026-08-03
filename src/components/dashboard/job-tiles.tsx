@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card, CardBody, Badge } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { DeleteJobButton } from "@/components/jobs/delete-job-button";
 import { isolateCardAction, jobCardNavigation } from "@/lib/routes";
 import type { WorkspaceSummary } from "@/lib/dal/types";
@@ -25,26 +26,25 @@ export function JobTiles({ workspaces }: { workspaces: WorkspaceSummary[] }) {
   const router = useRouter();
   const { toast } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
+  const [archiveTarget, setArchiveTarget] = useState<WorkspaceSummary | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
-  async function archive(id: string) {
-    if (
-      !confirm(
-        "Archive this job workspace? You can restore it later from archived jobs."
-      )
-    ) {
-      return;
-    }
-    setBusy(id);
+  async function confirmArchive() {
+    if (!archiveTarget) return;
+    setBusy(archiveTarget.id);
+    setArchiveError(null);
     try {
-      const res = await fetch(`/api/workspaces/${id}`, {
+      const res = await fetch(`/api/workspaces/${archiveTarget.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workspace_status: "ARCHIVED" }),
       });
       if (!res.ok) throw new Error();
+      setArchiveTarget(null);
       toast("Workspace archived.", "success");
       router.refresh();
     } catch {
+      setArchiveError("Could not archive this workspace. Please try again.");
       toast("Could not archive workspace.", "error");
     } finally {
       setBusy(null);
@@ -68,78 +68,112 @@ export function JobTiles({ workspaces }: { workspaces: WorkspaceSummary[] }) {
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      {workspaces.map((w) => {
-        const archived = w.workspace_status === "ARCHIVED";
-        const nav = jobCardNavigation(w.id, { archived });
-        const title = w.job_title || "Untitled job";
+    <>
+      <div className="grid gap-4 md:grid-cols-2">
+        {workspaces.map((w) => {
+          const archived = w.workspace_status === "ARCHIVED";
+          const nav = jobCardNavigation(w.id, { archived });
+          const title = w.job_title || "Untitled job";
 
-        return (
-          <Card
-            key={w.id}
-            className={`flex flex-col transition-all duration-150 ${
-              nav.canNavigate
-                ? "hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md"
-                : "opacity-90"
-            }`}
-          >
-            {nav.workspaceHref ? (
-              <Link
-                href={nav.workspaceHref}
-                aria-label={`Open workspace for ${title}`}
-                className="block cursor-pointer rounded-t-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
-              >
-                <JobCardBody w={w} title={title} />
-              </Link>
-            ) : (
-              <div aria-disabled="true">
-                <JobCardBody w={w} title={title} />
+          return (
+            <Card
+              key={w.id}
+              className={`flex flex-col transition-all duration-150 ${
+                nav.canNavigate
+                  ? "hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md"
+                  : "opacity-90"
+              }`}
+            >
+              {nav.workspaceHref ? (
+                <Link
+                  href={nav.workspaceHref}
+                  aria-label={`Open workspace for ${title}`}
+                  className="block cursor-pointer rounded-t-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500"
+                >
+                  <JobCardBody w={w} title={title} />
+                </Link>
+              ) : (
+                <div aria-disabled="true">
+                  <JobCardBody w={w} title={title} />
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2 px-5 pb-5 pt-1">
+                <Link
+                  href={nav.actions.openWorkspace}
+                  className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                  onClick={(e) => isolateCardAction(e)}
+                >
+                  Open Workspace
+                </Link>
+                <Link
+                  href={nav.actions.addCandidates}
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                  onClick={(e) => isolateCardAction(e)}
+                >
+                  Add Candidates
+                </Link>
+                <Link
+                  href={nav.actions.edit}
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+                  onClick={(e) => isolateCardAction(e)}
+                >
+                  Edit Job
+                </Link>
+                <button
+                  type="button"
+                  onClick={(e) =>
+                    isolateCardAction(e, () => {
+                      setArchiveError(null);
+                      setArchiveTarget(w);
+                    })
+                  }
+                  disabled={busy === w.id || archived}
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:opacity-50"
+                >
+                  {busy === w.id ? "Archiving…" : "Archive"}
+                </button>
+                <DeleteJobButton
+                  workspaceId={w.id}
+                  jobTitle={w.job_title}
+                  candidateCount={w.candidate_count}
+                />
+                <span className="ml-auto text-[11px] text-slate-400">
+                  Updated {timeAgo(w.updated_at)}
+                </span>
               </div>
-            )}
+            </Card>
+          );
+        })}
+      </div>
 
-            <div className="flex flex-wrap items-center gap-2 px-5 pb-5 pt-1">
-              <Link
-                href={nav.actions.openWorkspace}
-                className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
-                onClick={(e) => isolateCardAction(e)}
-              >
-                Open Workspace
-              </Link>
-              <Link
-                href={nav.actions.addCandidates}
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
-                onClick={(e) => isolateCardAction(e)}
-              >
-                Add Candidates
-              </Link>
-              <Link
-                href={nav.actions.edit}
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
-                onClick={(e) => isolateCardAction(e)}
-              >
-                Edit Job
-              </Link>
-              <button
-                type="button"
-                onClick={(e) => isolateCardAction(e, () => archive(w.id))}
-                disabled={busy === w.id || archived}
-                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:opacity-50"
-              >
-                {busy === w.id ? "Archiving…" : "Archive"}
-              </button>
-              <DeleteJobButton
-                workspaceId={w.id}
-                jobTitle={w.job_title}
-                candidateCount={w.candidate_count}
-              />
-              <span className="ml-auto text-[11px] text-slate-400">
-                Updated {timeAgo(w.updated_at)}
-              </span>
-            </div>
-          </Card>
-        );
-      })}
-    </div>
+      <ConfirmModal
+        isOpen={Boolean(archiveTarget)}
+        title="Archive job workspace?"
+        description={
+          <>
+            Archive{" "}
+            <span className="font-medium text-slate-800">
+              {archiveTarget?.job_title || "this job"}
+            </span>
+            ? You can restore it later from archived jobs. Candidates and analyses stay
+            available.
+          </>
+        }
+        confirmLabel="Archive job"
+        confirmLoadingLabel="Archiving…"
+        cancelLabel="Cancel"
+        variant="warning"
+        isLoading={busy === archiveTarget?.id}
+        error={archiveError}
+        onCancel={() => {
+          if (busy) return;
+          setArchiveTarget(null);
+          setArchiveError(null);
+        }}
+        onConfirm={confirmArchive}
+      />
+    </>
   );
 }
 

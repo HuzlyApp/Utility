@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button, Card, CardBody, CardHeader, TextInput } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { useRouter } from "next/navigation";
 
 interface TenantUser {
@@ -21,6 +22,9 @@ export function TenantUsersAdmin({ initial }: { initial: TenantUser[] }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TenantUser | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [suspendTarget, setSuspendTarget] = useState<TenantUser | null>(null);
+  const [suspendError, setSuspendError] = useState<string | null>(null);
   const [form, setForm] = useState({
     full_name: "",
     email: "",
@@ -72,6 +76,7 @@ export function TenantUsersAdmin({ initial }: { initial: TenantUser[] }) {
 
   async function setStatus(userId: string, status: "ACTIVE" | "SUSPENDED") {
     setBusyId(userId);
+    setSuspendError(null);
     try {
       const res = await fetch(`/api/workspace/users/${userId}`, {
         method: "PATCH",
@@ -80,10 +85,13 @@ export function TenantUsersAdmin({ initial }: { initial: TenantUser[] }) {
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        toast(data.error ?? "Could not update user.", "error");
+        const message = data.error ?? "Could not update user.";
+        if (status === "SUSPENDED") setSuspendError(message);
+        toast(message, "error");
         return;
       }
       toast(status === "ACTIVE" ? "User activated." : "User suspended.", "success");
+      setSuspendTarget(null);
       await refresh();
       router.refresh();
     } finally {
@@ -94,12 +102,14 @@ export function TenantUsersAdmin({ initial }: { initial: TenantUser[] }) {
   async function confirmDelete() {
     if (!deleteTarget) return;
     setDeleting(true);
+    setDeleteError(null);
     try {
       const res = await fetch(`/api/workspace/users/${deleteTarget.user_id}`, {
         method: "DELETE",
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
+        setDeleteError(data.error ?? "Could not delete user.");
         toast(data.error ?? "Could not delete user.", "error");
         return;
       }
@@ -193,7 +203,10 @@ export function TenantUsersAdmin({ initial }: { initial: TenantUser[] }) {
                       size="sm"
                       variant="secondary"
                       disabled={busy || u.status === "SUSPENDED"}
-                      onClick={() => void setStatus(u.user_id, "SUSPENDED")}
+                      onClick={() => {
+                        setSuspendError(null);
+                        setSuspendTarget(u);
+                      }}
                     >
                       Suspend
                     </Button>
@@ -204,7 +217,10 @@ export function TenantUsersAdmin({ initial }: { initial: TenantUser[] }) {
                       disabled={busy}
                       aria-label={`Delete ${u.full_name ?? u.email ?? "user"}`}
                       title="Delete user"
-                      onClick={() => setDeleteTarget(u)}
+                      onClick={() => {
+                        setDeleteError(null);
+                        setDeleteTarget(u);
+                      }}
                     >
                       Delete
                     </Button>
@@ -216,52 +232,62 @@ export function TenantUsersAdmin({ initial }: { initial: TenantUser[] }) {
         </CardBody>
       </Card>
 
-      {deleteTarget && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
-          onClick={() => {
-            if (!deleting) setDeleteTarget(null);
-          }}
-        >
-          <div
-            className="w-full max-w-md rounded-xl bg-white shadow-xl"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-user-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="border-b border-slate-200 px-5 py-4">
-              <h3 id="delete-user-title" className="text-base font-semibold text-slate-900">
-                Delete user?
-              </h3>
-              <p className="mt-2 text-sm text-slate-600">
-                Are you sure you want to delete{" "}
-                <span className="font-medium text-slate-800">
-                  {deleteTarget.full_name ?? deleteTarget.email ?? "this user"}
-                </span>
-                ? They will no longer be able to sign in. Candidate history they created
-                remains intact.
-              </p>
-            </div>
-            <div className="flex justify-end gap-2 px-5 py-4">
-              <Button
-                variant="secondary"
-                disabled={deleting}
-                onClick={() => setDeleteTarget(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="danger"
-                disabled={deleting}
-                onClick={() => void confirmDelete()}
-              >
-                {deleting ? "Deleting…" : "Delete user"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmModal
+        isOpen={Boolean(suspendTarget)}
+        title="Suspend user?"
+        description={
+          <>
+            Suspend{" "}
+            <span className="font-medium text-slate-800">
+              {suspendTarget?.full_name ?? suspendTarget?.email ?? "this user"}
+            </span>
+            ? This user will no longer be able to sign in. Their previous candidate activity
+            will remain visible. You can activate them again later.
+          </>
+        }
+        confirmLabel="Suspend user"
+        confirmLoadingLabel="Suspending…"
+        cancelLabel="Cancel"
+        variant="warning"
+        isLoading={busyId === suspendTarget?.user_id}
+        error={suspendError}
+        onCancel={() => {
+          if (busyId) return;
+          setSuspendTarget(null);
+          setSuspendError(null);
+        }}
+        onConfirm={() => {
+          if (suspendTarget) void setStatus(suspendTarget.user_id, "SUSPENDED");
+        }}
+      />
+
+      <ConfirmModal
+        isOpen={Boolean(deleteTarget)}
+        title="Delete user?"
+        description={
+          <>
+            Are you sure you want to delete{" "}
+            <span className="font-medium text-slate-800">
+              {deleteTarget?.full_name ?? deleteTarget?.email ?? "this user"}
+            </span>
+            ? This user will no longer be able to sign in. Their previous candidate activity
+            will remain visible.
+          </>
+        }
+        confirmLabel="Delete user"
+        confirmLoadingLabel="Deleting…"
+        cancelLabel="Cancel"
+        variant="destructive"
+        isLoading={deleting}
+        error={deleteError}
+        onCancel={() => {
+          if (!deleting) {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }
+        }}
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }

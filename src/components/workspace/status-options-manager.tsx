@@ -10,6 +10,7 @@ import {
   TextInput,
 } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
 import type { CandidateStatusRow } from "@/lib/dal/types";
@@ -29,6 +30,7 @@ export function StatusOptionsManager({
   const [adding, setAdding] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CandidateStatusRow | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const { toast } = useToast();
   const router = useRouter();
 
@@ -133,6 +135,7 @@ export function StatusOptionsManager({
   async function confirmDelete() {
     if (!deleteTarget) return;
     setDeleting(true);
+    setDeleteError(null);
     try {
       const res = await fetch("/api/settings/statuses", {
         method: "DELETE",
@@ -141,6 +144,7 @@ export function StatusOptionsManager({
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
+        setDeleteError(data.error ?? "Could not delete status.");
         toast(data.error ?? "Could not delete status.", "error");
         return;
       }
@@ -385,7 +389,10 @@ export function StatusOptionsManager({
                     variant="outline"
                     className="h-8 w-8 shrink-0 border-red-300 px-0 text-red-600 hover:bg-red-50 hover:text-red-700"
                     disabled={rowBusy}
-                    onClick={() => setDeleteTarget(status)}
+                    onClick={() => {
+                      setDeleteError(null);
+                      setDeleteTarget(status);
+                    }}
                     aria-label={`Delete ${status.name} status`}
                     title={`Delete ${status.name}`}
                   >
@@ -404,49 +411,30 @@ export function StatusOptionsManager({
       </CardBody>
 
       {deleteTarget && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
-          onClick={() => {
-            if (!deleting) setDeleteTarget(null);
+        <ConfirmModal
+          isOpen
+          title="Delete candidate status?"
+          description={
+            <>
+              Are you sure you want to delete &ldquo;{deleteTarget.name}&rdquo;? This status will
+              be permanently removed if it has never been used. Historical status data remains
+              protected when a status has been assigned to candidates.
+            </>
+          }
+          confirmLabel="Delete status"
+          confirmLoadingLabel="Deleting…"
+          cancelLabel="Cancel"
+          variant="destructive"
+          isLoading={deleting}
+          error={deleteError}
+          onCancel={() => {
+            if (!deleting) {
+              setDeleteTarget(null);
+              setDeleteError(null);
+            }
           }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape" && !deleting) setDeleteTarget(null);
-          }}
-        >
-          <div
-            className="w-full max-w-md rounded-xl bg-white shadow-xl"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-status-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="border-b border-slate-200 px-5 py-4">
-              <h3 id="delete-status-title" className="text-base font-semibold text-slate-900">
-                Delete candidate status?
-              </h3>
-              <p className="mt-2 text-sm text-slate-600">
-                Are you sure you want to delete &ldquo;{deleteTarget.name}&rdquo;? This action
-                cannot be undone.
-              </p>
-            </div>
-            <div className="flex justify-end gap-2 px-5 py-4">
-              <Button
-                variant="secondary"
-                disabled={deleting}
-                onClick={() => setDeleteTarget(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="danger"
-                disabled={deleting}
-                onClick={() => void confirmDelete()}
-              >
-                {deleting ? "Deleting…" : "Delete status"}
-              </Button>
-            </div>
-          </div>
-        </div>
+          onConfirm={confirmDelete}
+        />
       )}
     </Card>
   );

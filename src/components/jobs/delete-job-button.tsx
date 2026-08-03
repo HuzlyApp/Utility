@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 
 type Props = {
   workspaceId: string;
@@ -22,24 +23,19 @@ export function DeleteJobButton({
 }: Props) {
   const router = useRouter();
   const { toast } = useToast();
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  async function onDelete(e?: React.MouseEvent) {
-    e?.stopPropagation();
-    const label = jobTitle?.trim() || "this job";
-    const candNote =
-      candidateCount > 0
-        ? ` This permanently deletes ${candidateCount} candidate${candidateCount === 1 ? "" : "s"} that only belong to this job (shared candidates are detached).`
-        : "";
-    if (
-      !confirm(
-        `Delete ${label}?${candNote}\n\nThis cannot be undone.`
-      )
-    ) {
-      return;
-    }
+  const label = jobTitle?.trim() || "this job";
+  const candNote =
+    candidateCount > 0
+      ? ` This permanently deletes ${candidateCount} candidate${candidateCount === 1 ? "" : "s"} that only belong to this job (shared candidates are detached).`
+      : " Shared candidates attached to other jobs will be detached, not deleted.";
 
+  async function onConfirm() {
     setBusy(true);
+    setError(null);
     try {
       const res = await fetch(`/api/workspaces/${workspaceId}`, {
         method: "DELETE",
@@ -57,6 +53,7 @@ export function DeleteJobButton({
           `${detached} shared candidate${detached === 1 ? "" : "s"} detached.`
         );
       }
+      setOpen(false);
       toast(parts.join(" "), "success");
       if (redirectToDashboard) {
         router.push("/dashboard");
@@ -65,6 +62,7 @@ export function DeleteJobButton({
         router.refresh();
       }
     } catch {
+      setError("Could not delete this job. Please try again.");
       toast("Could not delete job.", "error");
     } finally {
       setBusy(false);
@@ -72,16 +70,46 @@ export function DeleteJobButton({
   }
 
   return (
-    <button
-      type="button"
-      onClick={onDelete}
-      disabled={busy}
-      className={
-        className ??
-        "rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-      }
-    >
-      {busy ? "Deleting…" : "Delete"}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setError(null);
+          setOpen(true);
+        }}
+        disabled={busy}
+        className={
+          className ??
+          "rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+        }
+      >
+        Delete
+      </button>
+
+      <ConfirmModal
+        isOpen={open}
+        title={`Delete ${label}?`}
+        description={
+          <>
+            This will permanently delete the job workspace and its ranking data.
+            {candNote} This action cannot be undone.
+          </>
+        }
+        confirmLabel="Delete job"
+        confirmLoadingLabel="Deleting…"
+        cancelLabel="Cancel"
+        variant="destructive"
+        isLoading={busy}
+        error={error}
+        onCancel={() => {
+          if (!busy) {
+            setOpen(false);
+            setError(null);
+          }
+        }}
+        onConfirm={onConfirm}
+      />
+    </>
   );
 }

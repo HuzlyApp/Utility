@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button, Card, CardBody, CardHeader, TextArea } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { formatTimestamp } from "@/lib/client/candidate-crm";
 import type { CandidateNoteRow } from "@/lib/dal/types";
 import { canEditNote, type CrmActorRole } from "@/lib/candidate-crm";
@@ -23,6 +24,9 @@ export function CandidateNotesPanel({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<CandidateNoteRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const { toast } = useToast();
 
   async function addNote() {
@@ -71,22 +75,25 @@ export function CandidateNotesPanel({
     }
   }
 
-  async function removeNote(noteId: string) {
-    if (!confirm("Delete this note? The deletion will remain in activity history.")) return;
-    setBusy(true);
+  async function confirmDeleteNote() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
     try {
-      const res = await fetch(`/api/candidates/${candidateId}/notes/${noteId}`, {
+      const res = await fetch(`/api/candidates/${candidateId}/notes/${deleteTarget.id}`, {
         method: "DELETE",
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
+        setDeleteError(data.error ?? "Could not delete note.");
         toast(data.error ?? "Could not delete note.", "error");
         return;
       }
-      setNotes((prev) => prev.filter((n) => n.id !== noteId));
+      setNotes((prev) => prev.filter((n) => n.id !== deleteTarget.id));
+      setDeleteTarget(null);
       toast("Note deleted.", "success");
     } finally {
-      setBusy(false);
+      setDeleting(false);
     }
   }
 
@@ -153,7 +160,7 @@ export function CandidateNotesPanel({
                         <Button
                           size="sm"
                           variant="ghost"
-                          disabled={busy}
+                          disabled={busy || deleting}
                           onClick={() => {
                             setEditingId(note.id);
                             setEditText(note.note_text);
@@ -164,8 +171,11 @@ export function CandidateNotesPanel({
                         <Button
                           size="sm"
                           variant="ghost"
-                          disabled={busy}
-                          onClick={() => removeNote(note.id)}
+                          disabled={busy || deleting}
+                          onClick={() => {
+                            setDeleteError(null);
+                            setDeleteTarget(note);
+                          }}
                         >
                           Delete
                         </Button>
@@ -178,6 +188,25 @@ export function CandidateNotesPanel({
           })}
         </ul>
       </CardBody>
+
+      <ConfirmModal
+        isOpen={Boolean(deleteTarget)}
+        title="Delete note?"
+        description="This note will be removed from the candidate profile. The deletion may remain visible in the audit history."
+        confirmLabel="Delete note"
+        confirmLoadingLabel="Deleting…"
+        cancelLabel="Cancel"
+        variant="destructive"
+        isLoading={deleting}
+        error={deleteError}
+        onCancel={() => {
+          if (!deleting) {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }
+        }}
+        onConfirm={confirmDeleteNote}
+      />
     </Card>
   );
 }

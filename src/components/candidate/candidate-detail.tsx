@@ -59,6 +59,7 @@ import {
 import { formatTimestamp } from "@/lib/client/candidate-crm";
 import type { CandidateNoteRow, CandidateActivityRow } from "@/lib/dal/types";
 import type { CrmActorRole } from "@/lib/candidate-crm";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 
 interface CandidateProps {
   id: string;
@@ -179,6 +180,9 @@ export function CandidateDetail({
     existingName: string;
   } | null>(null);
   const [nameDecision, setNameDecision] = useState<"keep" | "replace">("keep");
+  const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const duplicateResolverRef = React.useRef<((continued: boolean) => void) | null>(null);
   const resumeProgressTimersRef = React.useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -495,17 +499,22 @@ export function CandidateDetail({
 
   async function removeFromJob() {
     if (!workspaceId) return;
-    if (!confirm("Remove this candidate from the job? Their record and files are kept.")) return;
+    setRemoveError(null);
+    setRemoving(true);
     try {
       const res = await fetch(`/api/workspaces/${workspaceId}/candidates/${candidate.id}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error();
-      toast("Candidate removed from job.", "success");
+      setRemoveConfirmOpen(false);
+      toast("Candidate removed from job successfully.", "success");
       router.push(`/jobs/${workspaceId}`);
       router.refresh();
     } catch {
+      setRemoveError("Could not remove the candidate from this job. Please try again.");
       toast("Could not remove candidate.", "error");
+    } finally {
+      setRemoving(false);
     }
   }
 
@@ -897,7 +906,10 @@ export function CandidateDetail({
               Download Assessment
             </a>
             <button
-              onClick={removeFromJob}
+              onClick={() => {
+                setRemoveError(null);
+                setRemoveConfirmOpen(true);
+              }}
               className="rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50"
             >
               Remove from Job
@@ -937,6 +949,25 @@ export function CandidateDetail({
         onSubmit={() => runResumeUpdate(false)}
         onContinueMismatch={() => runResumeUpdate(true)}
         onNameDecision={setNameDecision}
+      />
+
+      <ConfirmModal
+        isOpen={removeConfirmOpen}
+        title="Remove candidate from job?"
+        description="Remove this candidate from the selected job? The candidate record, uploaded files, notes, and analysis history will be kept."
+        confirmLabel="Remove from Job"
+        confirmLoadingLabel="Removing..."
+        cancelLabel="Cancel"
+        variant="destructive"
+        isLoading={removing}
+        error={removeError}
+        onCancel={() => {
+          if (!removing) {
+            setRemoveConfirmOpen(false);
+            setRemoveError(null);
+          }
+        }}
+        onConfirm={removeFromJob}
       />
     </div>
       )}
