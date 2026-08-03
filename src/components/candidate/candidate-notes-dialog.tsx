@@ -51,31 +51,31 @@ export function CandidateNotesDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-slate-900/50 p-4"
+      className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="candidate-notes-dialog-title"
       onClick={onClose}
     >
       <div
-        className="mt-10 w-full max-w-lg rounded-xl bg-white shadow-xl"
+        className="mt-0 flex max-h-[92vh] w-full flex-col rounded-t-xl bg-white shadow-xl sm:mt-10 sm:max-h-[85vh] sm:max-w-lg sm:rounded-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-          <div>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
+          <div className="min-w-0">
             <h3
               id="candidate-notes-dialog-title"
-              className="text-base font-semibold text-slate-900"
+              className="truncate text-base font-semibold text-slate-900"
             >
               Notes
             </h3>
-            <p className="text-xs text-slate-500">{candidateName}</p>
+            <p className="truncate text-xs text-slate-500">{candidateName}</p>
           </div>
           <Button variant="ghost" size="sm" onClick={onClose}>
             Close
           </Button>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto p-5">
+        <div className="dialog-scroll flex-1 overflow-y-auto p-5">
           {notes == null ? (
             <p className="py-6 text-center text-sm text-slate-500">Loading notes…</p>
           ) : error ? (

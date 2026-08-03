@@ -586,7 +586,7 @@ export function RankingTable({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
         <AiModelSelector
           value={optionId}
           onChange={setOptionId}
@@ -598,7 +598,7 @@ export function RankingTable({
             ? `${option.loadingLabel.replace(/…$/, "")} ${aggregatePercent}%`
             : "Analyze All Ready Candidates"}
         </Button>
-        <span className="pb-2 text-xs text-slate-500">
+        <span className="text-xs text-slate-500">
           Using <span className="font-medium text-slate-700">{option.label}</span>
         </span>
         {selectedIds.length >= 2 && selectedEntries.length >= 2 && (
@@ -606,17 +606,17 @@ export function RankingTable({
             Compare Selected ({selectedEntries.length})
           </Button>
         )}
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 lg:ml-auto lg:w-auto lg:flex lg:flex-wrap lg:items-center">
           <input
             placeholder="Search name…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 rounded-lg border border-slate-300 px-2 text-xs"
+            className="h-9 w-full rounded-lg border border-slate-300 px-2 text-sm lg:h-8"
           />
           <select
             value={catFilter}
             onChange={(e) => setCatFilter(e.target.value)}
-            className="h-8 rounded-lg border border-slate-300 px-2 text-xs"
+            className="h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm lg:h-8"
           >
             <option value="">All categories</option>
             {categories.map((c) => (
@@ -628,7 +628,7 @@ export function RankingTable({
           <select
             value={readyFilter}
             onChange={(e) => setReadyFilter(e.target.value)}
-            className="h-8 rounded-lg border border-slate-300 px-2 text-xs"
+            className="h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm lg:h-8"
           >
             <option value="">All readiness</option>
             {Object.entries(READINESS_LABEL).map(([k, v]) => (
@@ -640,8 +640,8 @@ export function RankingTable({
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="h-8 rounded-lg border border-slate-300 px-2 text-xs"
             aria-label="Filter by stage"
+            className="h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm lg:h-8"
           >
             <option value="">All stages</option>
             <option value="__none__">No stage</option>
@@ -660,7 +660,7 @@ export function RankingTable({
               setSortKey(k as SortKey);
               setSortDir(d as "asc" | "desc");
             }}
-            className="h-8 rounded-lg border border-slate-300 px-2 text-xs"
+            className="col-span-2 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm sm:col-span-1 lg:h-8"
           >
             <option value="score:desc">Score (high→low)</option>
             <option value="score:asc">Score (low→high)</option>

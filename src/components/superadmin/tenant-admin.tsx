@@ -160,12 +160,12 @@ export function TenantAdmin({ initial }: { initial: TenantRow[] }) {
         <div className="mt-3 space-y-2">
           {rows.map((t) => (
             <div key={t.id} className="rounded-lg border border-slate-100 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-medium text-slate-900">{t.name}</p>
-                  <p className="text-xs text-slate-500">{t.slug}</p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <p className="break-words font-medium text-slate-900">{t.name}</p>
+                  <p className="break-all text-xs text-slate-500">{t.slug}</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
                   <Button
                     size="sm"
                     variant="secondary"

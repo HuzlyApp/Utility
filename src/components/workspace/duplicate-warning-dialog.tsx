@@ -37,14 +37,14 @@ export function DuplicateWarningDialog({
   const message = duplicateWarningMessage(candidateName, confidence);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+    <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-4">
       <div
-        className="w-full max-w-lg rounded-xl bg-white shadow-xl"
+        className="dialog-scroll max-h-[92vh] w-full overflow-y-auto rounded-t-xl bg-white shadow-xl sm:max-h-[90vh] sm:max-w-lg sm:rounded-xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="duplicate-warning-title"
       >
-        <div className="border-b border-slate-200 px-5 py-4">
+        <div className="sticky top-0 border-b border-slate-200 bg-white px-5 py-4">
           <h3
             id="duplicate-warning-title"
             className="text-base font-semibold text-slate-900"
@@ -87,7 +87,7 @@ export function DuplicateWarningDialog({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-3">
+        <div className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
           <Button variant="ghost" size="sm" onClick={onCancel}>
             Cancel
           </Button>

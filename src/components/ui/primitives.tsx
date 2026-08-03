@@ -84,17 +84,17 @@ export function CardHeader({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
-      <div className="flex items-start gap-3">
-        {icon && <span className="mt-0.5 text-slate-400">{icon}</span>}
-        <div>
+    <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+      <div className="flex min-w-0 items-start gap-3">
+        {icon && <span className="mt-0.5 shrink-0 text-slate-400">{icon}</span>}
+        <div className="min-w-0">
           <h3 className="text-[15px] font-semibold text-slate-900">{title}</h3>
           {description && (
             <p className="mt-0.5 text-[13px] text-slate-500">{description}</p>
           )}
         </div>
       </div>
-      {action}
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   );
 }
@@ -163,7 +163,7 @@ export function Tabs({
   return (
     <div
       role="tablist"
-      className="inline-flex rounded-lg bg-slate-100 p-1"
+      className="scroll-x -mx-1 inline-flex max-w-full overflow-x-auto px-1 rounded-lg bg-slate-100 p-1"
     >
       {tabs.map((t) => (
         <button
@@ -172,7 +172,7 @@ export function Tabs({
           aria-selected={value === t.value}
           onClick={() => onChange(t.value)}
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+            "inline-flex shrink-0 items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
             value === t.value
               ? "bg-white text-slate-900 shadow-sm"
               : "text-slate-500 hover:text-slate-700"
@@ -203,7 +203,7 @@ export function Tooltip({
       </span>
       <span
         role="tooltip"
-        className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 rounded-lg bg-slate-900 px-3 py-2 text-xs text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+        className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 w-56 max-w-[min(14rem,80vw)] -translate-x-1/2 rounded-lg bg-slate-900 px-3 py-2 text-xs text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
       >
         {content}
       </span>

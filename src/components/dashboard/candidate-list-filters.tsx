@@ -33,7 +33,7 @@ function Select({
         {label}
       </span>
       <select
-        className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-sm"
+        className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-sm sm:h-9"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
@@ -75,8 +75,8 @@ export function CandidateListFilters({
   const labelOf = (r: RecruiterOption) => r.full_name || r.email || r.user_id;
 
   return (
-    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-      <div className="flex flex-wrap gap-3">
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Select
           label="Status"
           value={searchParams.get("status") ?? ""}
@@ -156,14 +156,14 @@ export function CandidateListFilters({
           ))}
         </Select>
       </div>
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-[repeat(2,minmax(140px,1fr))_auto] sm:items-end lg:grid-cols-[repeat(2,minmax(140px,1fr))_auto]">
         <label className="block">
           <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
             Updated from
           </span>
           <input
             type="date"
-            className="h-9 rounded-md border border-slate-300 px-2 text-sm"
+            className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
             value={searchParams.get("from") ?? ""}
             onChange={(e) => update("from", e.target.value)}
           />
@@ -174,14 +174,14 @@ export function CandidateListFilters({
           </span>
           <input
             type="date"
-            className="h-9 rounded-md border border-slate-300 px-2 text-sm"
+            className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
             value={searchParams.get("to") ?? ""}
             onChange={(e) => update("to", e.target.value)}
           />
         </label>
         <Link
           href={pathname}
-          className="h-9 rounded-md border border-slate-300 px-3 text-sm leading-9 text-slate-600 hover:bg-slate-50"
+          className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50"
         >
           Clear filters
         </Link>

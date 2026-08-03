@@ -187,11 +187,11 @@ export function CreateJobForm({
         </CardBody>
       </Card>
 
-      <div className="flex justify-end gap-3">
-        <Button variant="secondary" onClick={() => router.push("/dashboard")}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+        <Button variant="secondary" className="w-full sm:w-auto" onClick={() => router.push("/dashboard")}>
           Cancel
         </Button>
-        <Button size="lg" onClick={save} disabled={saving}>
+        <Button size="lg" className="w-full sm:w-auto" onClick={save} disabled={saving}>
           {saving ? "Saving…" : workspaceId ? "Save Job" : "Save Job and Add Candidates"}
         </Button>
       </div>

@@ -65,15 +65,15 @@ export function CompareDialog({
   }, [entries]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-auto bg-slate-900/50 p-4">
-      <div className="mt-6 w-full max-w-6xl rounded-xl bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+    <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-4">
+      <div className="flex max-h-[92vh] w-full flex-col rounded-t-xl bg-white shadow-xl sm:max-h-[90vh] sm:max-w-6xl sm:rounded-xl">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
           <h3 className="text-base font-semibold text-slate-900">Compare candidates</h3>
           <Button variant="ghost" size="sm" onClick={onClose}>
             Close
           </Button>
         </div>
-        <div className="p-5">
+        <div className="dialog-scroll overflow-y-auto p-5">
           {loading ? (
             <p className="py-8 text-center text-sm text-slate-500">Loading comparison…</p>
           ) : (

@@ -43,7 +43,7 @@ export function TenantSettingsForm({
       <CardBody className="space-y-3">
         <div>
           <p className="mb-1 text-xs text-slate-500">Tenant slug</p>
-          <p className="text-sm font-medium text-slate-700">{tenantSlug}</p>
+          <p className="break-all text-sm font-medium text-slate-700">{tenantSlug}</p>
         </div>
         <div>
           <p className="mb-1 text-xs text-slate-500">Tenant name</p>

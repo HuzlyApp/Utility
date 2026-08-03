@@ -48,9 +48,13 @@ export function UpdateResumeDialog({
   const canDismiss = !pending || isFailed;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
-      <div className="w-full max-w-xl rounded-xl bg-white shadow-xl" role="dialog" aria-modal="true">
-        <div className="border-b border-slate-200 px-5 py-4">
+    <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-4">
+      <div
+        className="dialog-scroll max-h-[92vh] w-full overflow-y-auto rounded-t-xl bg-white shadow-xl sm:max-h-[90vh] sm:max-w-xl sm:rounded-xl"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="sticky top-0 border-b border-slate-200 bg-white px-5 py-4">
           <h3 className="text-base font-semibold text-slate-900">
             Update resume for {candidateName}
           </h3>
@@ -152,7 +156,7 @@ export function UpdateResumeDialog({
           )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-3">
+        <div className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
           {!mismatch ? (
             <>
               <Button variant="ghost" size="sm" onClick={onClose} disabled={!canDismiss}>
