@@ -29,6 +29,10 @@ import {
 } from "./ai-model-selector";
 import { useAiModelSelection } from "@/hooks/use-ai-model-selection";
 import { AnalysisProgressBar, analysisPercent, stageFromEvent } from "./analysis-progress";
+import {
+  CandidateStatusSelect,
+  type StatusOption,
+} from "@/components/candidate/candidate-status-select";
 
 type SortKey = "score" | "name" | "category" | "readiness" | "verification" | "date";
 
@@ -104,9 +108,11 @@ function applyCompletedResult(
 export function RankingTable({
   workspaceId,
   initial,
+  statuses = [],
 }: {
   workspaceId: string;
   initial: RankedCandidateRow[];
+  statuses?: StatusOption[];
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -668,7 +674,8 @@ export function RankingTable({
               </th>
               <th className="px-2 py-2">Readiness</th>
               <th className="px-2 py-2">Recommended</th>
-              <th className="px-2 py-2">Status</th>
+              <th className="px-2 py-2">Stage</th>
+              <th className="px-2 py-2">Pipeline</th>
               <th className="px-2 py-2">Actions</th>
             </tr>
           </thead>
@@ -748,6 +755,22 @@ export function RankingTable({
                     {r.recommended_action
                       ? ACTION_LABEL[r.recommended_action] ?? r.recommended_action
                       : "—"}
+                  </td>
+                  <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
+                    <CandidateStatusSelect
+                      candidateId={r.candidate_id}
+                      statuses={statuses}
+                      value={r.current_status_id}
+                      statusName={r.status_name}
+                      statusColor={r.status_color}
+                      updatedByName={r.last_status_changed_by_name}
+                      updatedAt={r.last_status_changed_at}
+                      showAttribution={Boolean(r.last_status_changed_by_name)}
+                      onChanged={() => {
+                        void refresh();
+                        router.refresh();
+                      }}
+                    />
                   </td>
                   <td className="px-2 py-2">
                     <Badge tone={statusTone(r.status)}>

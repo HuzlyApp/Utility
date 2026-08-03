@@ -1,6 +1,7 @@
 import "server-only";
 import { getSql } from "./client";
 import { audit } from "./audit";
+import { logCandidateActivity } from "./activity";
 import { AuthError, type AppUser } from "@/lib/auth/session";
 import type { AiResult } from "@/lib/schema";
 import type { AnalyzeRequestBody } from "@/lib/types";
@@ -118,6 +119,21 @@ export async function saveCandidateAnalysis(
     },
   });
 
+  await logCandidateActivity({
+    tenantId,
+    candidateId: params.candidateId,
+    jobId: params.workspaceId,
+    performedByUserId: user.id,
+    actionType: "ANALYSIS_COMPLETED",
+    newValue: String(cm.recommended_overall_match_score),
+    metadata: {
+      analysis_id: analysisId,
+      ai_provider: provider,
+      ai_model: params.model,
+      match_category: cm.match_category,
+    },
+  });
+
   if (params.duplicateWarningAcknowledged) {
     await audit({
       actorUserId: user.id,
@@ -127,6 +143,17 @@ export async function saveCandidateAnalysis(
       action: "DUPLICATE_WARNING_OVERRIDDEN",
       newValue: {
         candidate_name: candidateName,
+        matched_analysis_ids: params.matchedAnalysisIds ?? [],
+        duplicate_confidence: params.duplicateConfidence ?? null,
+      },
+    });
+    await logCandidateActivity({
+      tenantId,
+      candidateId: params.candidateId,
+      jobId: params.workspaceId,
+      performedByUserId: user.id,
+      actionType: "DUPLICATE_WARNING_ACCEPTED",
+      metadata: {
         matched_analysis_ids: params.matchedAnalysisIds ?? [],
         duplicate_confidence: params.duplicateConfidence ?? null,
       },
@@ -374,6 +401,36 @@ export async function replaceAnalysisWithUpdatedResume(
   if (!resumeVersion) {
     throw new Error("Failed to update analysis with the new resume.");
   }
+
+  await logCandidateActivity({
+    tenantId,
+    candidateId: params.candidateId,
+    jobId: params.workspaceId,
+    performedByUserId: params.user.id,
+    actionType: "RESUME_REPLACED",
+    newValue: params.resumeFilename,
+    metadata: {
+      analysis_id: params.analysisId,
+      resume_version: resumeVersion,
+      ai_model: params.model,
+      ai_provider: params.provider,
+    },
+  });
+  await logCandidateActivity({
+    tenantId,
+    candidateId: params.candidateId,
+    jobId: params.workspaceId,
+    performedByUserId: params.user.id,
+    actionType: "ANALYSIS_RERUN",
+    newValue: String(cm.recommended_overall_match_score),
+    metadata: {
+      analysis_id: params.analysisId,
+      resume_version: resumeVersion,
+      ai_model: params.model,
+      ai_provider: params.provider,
+    },
+  });
+
   return { resumeVersion };
 }
 

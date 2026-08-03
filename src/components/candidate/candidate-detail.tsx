@@ -49,6 +49,16 @@ import {
   type ResumeUpdateProgress,
 } from "@/components/candidate/update-resume-dialog";
 import { updateResumeAndReanalyze, ResumeUpdateError } from "@/lib/client/update-resume";
+import { CandidateStatusSelect, type StatusOption } from "@/components/candidate/candidate-status-select";
+import { CandidateNotesPanel } from "@/components/candidate/candidate-notes-panel";
+import { CandidateActivityPanel } from "@/components/candidate/candidate-activity-panel";
+import {
+  CandidateAssignmentSelect,
+  type AssigneeOption,
+} from "@/components/candidate/candidate-assignment-select";
+import { formatTimestamp } from "@/lib/client/candidate-crm";
+import type { CandidateNoteRow, CandidateActivityRow } from "@/lib/dal/types";
+import type { CrmActorRole } from "@/lib/candidate-crm";
 
 interface CandidateProps {
   id: string;
@@ -60,8 +70,18 @@ interface CandidateProps {
   extracted_resume_text: string | null;
   ocr_confidence: number | null;
   extraction_quality: string | null;
-  recruiter_notes: string | null;
   verified_information: VerifiedRecruiterInputs;
+  current_status_id: string | null;
+  status_name: string | null;
+  status_color: string | null;
+  assigned_recruiter_id: string | null;
+  assigned_recruiter_name: string | null;
+  created_by_name: string | null;
+  updated_by_name: string | null;
+  last_status_changed_by_name: string | null;
+  last_status_changed_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 interface AnalysisProps {
@@ -92,6 +112,12 @@ export function CandidateDetail({
   disposition,
   dispositionNotes,
   history,
+  statuses,
+  recruiters,
+  notes: initialNotes,
+  activity,
+  currentUserId,
+  currentUserRole,
 }: {
   candidate: CandidateProps;
   workspaceId: string | null;
@@ -111,11 +137,18 @@ export function CandidateDetail({
     model_name?: string | null;
   }[];
   pipelineStatus?: string | null;
+  statuses: StatusOption[];
+  recruiters: AssigneeOption[];
+  notes: CandidateNoteRow[];
+  activity: CandidateActivityRow[];
+  currentUserId: string;
+  currentUserRole: CrmActorRole;
 }) {
   const router = useRouter();
   const { toast } = useToast();
   const { optionId, setOptionId, option, requestBody } = useAiModelSelection();
   const [availability, setAvailability] = useState<ProviderAvailability | null>(null);
+  const [tab, setTab] = useState<"overview" | "activity">("overview");
 
   const [name, setName] = useState(candidate.full_name ?? "");
   const [email, setEmail] = useState(candidate.email ?? "");
@@ -123,7 +156,6 @@ export function CandidateDetail({
   const [specialty, setSpecialty] = useState(candidate.specialty ?? "");
   const [location, setLocation] = useState(candidate.location ?? "");
   const [resumeText, setResumeText] = useState(candidate.extracted_resume_text ?? "");
-  const [notes, setNotes] = useState(candidate.recruiter_notes ?? "");
   const [verified, setVerified] = useState<VerifiedRecruiterInputs>(candidate.verified_information ?? {});
   const [savingCandidate, setSavingCandidate] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
@@ -158,7 +190,6 @@ export function CandidateDetail({
     setSpecialty(candidate.specialty ?? "");
     setLocation(candidate.location ?? "");
     setResumeText(candidate.extracted_resume_text ?? "");
-    setNotes(candidate.recruiter_notes ?? "");
     setVerified(candidate.verified_information ?? {});
   }, [candidate]);
 
@@ -481,6 +512,39 @@ export function CandidateDetail({
   const cm = r?.candidate_match;
 
   return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Candidate sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "overview"}
+          className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+            tab === "overview"
+              ? "bg-slate-900 text-white"
+              : "border border-slate-300 text-slate-600 hover:bg-slate-50"
+          }`}
+          onClick={() => setTab("overview")}
+        >
+          Overview
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "activity"}
+          className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+            tab === "activity"
+              ? "bg-slate-900 text-white"
+              : "border border-slate-300 text-slate-600 hover:bg-slate-50"
+          }`}
+          onClick={() => setTab("activity")}
+        >
+          Activity
+        </button>
+      </div>
+
+      {tab === "activity" ? (
+        <CandidateActivityPanel activity={activity} />
+      ) : (
     <div className="grid gap-6 lg:grid-cols-[1fr,360px]">
       {/* Main analysis column */}
       <div className="space-y-6">
@@ -504,6 +568,34 @@ export function CandidateDetail({
               <p className="text-sm text-slate-500">
                 {jobTitle ? `For: ${jobTitle}` : "No job attached"}
               </p>
+              <div className="mt-3 space-y-2">
+                <CandidateStatusSelect
+                  candidateId={candidate.id}
+                  statuses={statuses}
+                  value={candidate.current_status_id}
+                  statusName={candidate.status_name}
+                  statusColor={candidate.status_color}
+                  updatedByName={candidate.last_status_changed_by_name}
+                  updatedAt={candidate.last_status_changed_at}
+                  onChanged={() => router.refresh()}
+                />
+                <p className="text-[11px] text-slate-500">
+                  Candidate created by: {candidate.created_by_name || "—"}
+                  {candidate.created_at ? ` · ${formatTimestamp(candidate.created_at)}` : ""}
+                </p>
+                {analysis && (
+                  <p className="text-[11px] text-slate-500">
+                    Analysis completed by: {candidate.updated_by_name || "—"}
+                    {analysis.created_at ? ` · ${formatTimestamp(analysis.created_at)}` : ""}
+                    {(analysis.ai_model || analysis.model_name) &&
+                      ` · Model: ${analysis.ai_model ?? analysis.model_name}`}
+                  </p>
+                )}
+                <p className="text-[11px] text-slate-500">
+                  Last updated by: {candidate.updated_by_name || "—"}
+                  {candidate.updated_at ? ` · ${formatTimestamp(candidate.updated_at)}` : ""}
+                </p>
+              </div>
               {cm && (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Badge tone="blue">{DISPLAY_CATEGORY[cm.match_category as MatchCategory]}</Badge>
@@ -606,6 +698,14 @@ export function CandidateDetail({
         <Card>
           <CardHeader title="Candidate information" />
           <CardBody className="space-y-3">
+            <Field label="Assigned recruiter">
+              <CandidateAssignmentSelect
+                candidateId={candidate.id}
+                recruiters={recruiters}
+                value={candidate.assigned_recruiter_id}
+                onChanged={() => router.refresh()}
+              />
+            </Field>
             <Field label="Full name">
               <TextInput value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
@@ -732,20 +832,12 @@ export function CandidateDetail({
           </CardBody>
         </Card>
 
-        <Card>
-          <CardHeader title="Recruiter notes" />
-          <CardBody className="space-y-2">
-            <TextArea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={savingCandidate}
-              onClick={() => saveCandidate({ recruiter_notes: notes }, "Notes saved.")}
-            >
-              Save notes
-            </Button>
-          </CardBody>
-        </Card>
+        <CandidateNotesPanel
+          candidateId={candidate.id}
+          initialNotes={initialNotes}
+          currentUserId={currentUserId}
+          currentUserRole={currentUserRole}
+        />
 
         <DispositionPanel
           current={disposition}
@@ -846,6 +938,8 @@ export function CandidateDetail({
         onContinueMismatch={() => runResumeUpdate(true)}
         onNameDecision={setNameDecision}
       />
+    </div>
+      )}
     </div>
   );
 }

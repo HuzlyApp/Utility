@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/session";
 import {
-  getCandidate,
+  getCandidateDetail,
   getJobCandidate,
   getPrimaryWorkspaceId,
 } from "@/lib/dal/candidates";
@@ -11,6 +11,10 @@ import { getAnalysis, listCandidateAnalyses } from "@/lib/dal/analyses";
 import { listEntityFiles } from "@/lib/dal/fileStore";
 import { listScreeningAnswers } from "@/lib/dal/screening";
 import { getLatestDisposition } from "@/lib/dal/dispositions";
+import { listCandidateStatuses } from "@/lib/dal/statuses";
+import { listCandidateNotes } from "@/lib/dal/notes";
+import { listCandidateActivity } from "@/lib/dal/activity";
+import { listTenantUsers } from "@/lib/dal/users";
 import { CandidateDetail } from "@/components/candidate/candidate-detail";
 
 export const dynamic = "force-dynamic";
@@ -24,8 +28,9 @@ export default async function CandidateDetailPage({
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  if (!user.tenantId) redirect("/dashboard");
 
-  const candidate = await getCandidate(user, params.candidateId);
+  const candidate = await getCandidateDetail(user, params.candidateId);
   if (!candidate) notFound();
 
   const workspaceId = searchParams.w ?? (await getPrimaryWorkspaceId(user, params.candidateId));
@@ -38,12 +43,25 @@ export default async function CandidateDetailPage({
     ? await getAnalysis(user, jmc.latest_analysis_id)
     : null;
 
-  const [files, screening, disposition, history] = await Promise.all([
-    listEntityFiles(user, "candidate", params.candidateId),
-    workspaceId ? listScreeningAnswers(user, params.candidateId, workspaceId) : Promise.resolve([]),
-    workspaceId ? getLatestDisposition(user, workspaceId, params.candidateId) : Promise.resolve(null),
-    listCandidateAnalyses(user, params.candidateId),
-  ]);
+  const [files, screening, disposition, history, statuses, notes, activity, users] =
+    await Promise.all([
+      listEntityFiles(user, "candidate", params.candidateId),
+      workspaceId
+        ? listScreeningAnswers(user, params.candidateId, workspaceId)
+        : Promise.resolve([]),
+      workspaceId
+        ? getLatestDisposition(user, workspaceId, params.candidateId)
+        : Promise.resolve(null),
+      listCandidateAnalyses(user, params.candidateId),
+      listCandidateStatuses(user),
+      listCandidateNotes(user, params.candidateId),
+      listCandidateActivity(user, params.candidateId),
+      listTenantUsers(user.tenantId),
+    ]);
+
+  const recruiters = users.filter(
+    (u) => u.status === "ACTIVE" && u.role !== "SUPER_ADMIN"
+  );
 
   return (
     <div className="space-y-4">
@@ -74,8 +92,18 @@ export default async function CandidateDetailPage({
           extracted_resume_text: candidate.extracted_resume_text,
           ocr_confidence: candidate.ocr_confidence,
           extraction_quality: candidate.extraction_quality,
-          recruiter_notes: candidate.recruiter_notes,
           verified_information: candidate.verified_information ?? {},
+          current_status_id: candidate.current_status_id,
+          status_name: candidate.status_name,
+          status_color: candidate.status_color,
+          assigned_recruiter_id: candidate.assigned_recruiter_id,
+          assigned_recruiter_name: candidate.assigned_recruiter_name,
+          created_by_name: candidate.created_by_name,
+          updated_by_name: candidate.updated_by_name,
+          last_status_changed_by_name: candidate.last_status_changed_by_name,
+          last_status_changed_at: candidate.last_status_changed_at,
+          created_at: candidate.created_at,
+          updated_at: candidate.updated_at,
         }}
         workspaceId={workspaceId}
         jobTitle={workspace?.job_title ?? null}
@@ -94,11 +122,20 @@ export default async function CandidateDetailPage({
               }
             : null
         }
-        savedAnswers={screening.map((s) => ({ question: s.question, answer: s.answer ?? "" }))}
+        savedAnswers={screening.map((s) => ({
+          question: s.question,
+          answer: s.answer ?? "",
+        }))}
         disposition={disposition?.disposition ?? null}
         dispositionNotes={disposition?.notes ?? null}
         history={history}
         pipelineStatus={jmc?.status ?? null}
+        statuses={statuses}
+        recruiters={recruiters}
+        notes={notes}
+        activity={activity}
+        currentUserId={user.id}
+        currentUserRole={user.role}
       />
     </div>
   );

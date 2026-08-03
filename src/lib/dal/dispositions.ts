@@ -1,6 +1,7 @@
 import "server-only";
 import { getSql } from "./client";
 import { audit } from "./audit";
+import { logCandidateActivity } from "./activity";
 import { AuthError, type AppUser } from "@/lib/auth/session";
 import { DASHBOARD_DISPOSITIONS, type DashboardDisposition } from "./types";
 
@@ -39,6 +40,15 @@ export async function recordDisposition(params: {
     entityId: params.candidateId,
     action: "DISPOSITION_RECORDED",
     newValue: { disposition: params.disposition, workspaceId: params.workspaceId },
+  });
+  await logCandidateActivity({
+    tenantId,
+    candidateId: params.candidateId,
+    jobId: params.workspaceId,
+    performedByUserId: params.user.id,
+    actionType: "DISPOSITION_UPDATED",
+    newValue: params.disposition,
+    metadata: { analysis_id: params.analysisId ?? null },
   });
   return rows[0].id;
 }

@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getWorkspace } from "@/lib/dal/workspaces";
 import { listWorkspaceCandidates } from "@/lib/dal/candidates";
+import { listCandidateStatuses } from "@/lib/dal/statuses";
 import { Card, CardBody, CardHeader, Badge } from "@/components/ui/primitives";
 import { DeleteJobButton } from "@/components/jobs/delete-job-button";
 import { AddCandidates } from "@/components/workspace/add-candidates";
@@ -30,7 +31,10 @@ export default async function WorkspacePage({
   const ws = await getWorkspace(user, params.jobId);
   if (!ws) notFound();
 
-  const candidates = await listWorkspaceCandidates(user, params.jobId);
+  const [candidates, statuses] = await Promise.all([
+    listWorkspaceCandidates(user, params.jobId),
+    listCandidateStatuses(user),
+  ]);
   const sr = ws.structured_requirements ?? {};
 
   return (
@@ -89,7 +93,11 @@ export default async function WorkspacePage({
               description="Sorted best-first. Analyze ready candidates, then compare and decide."
             />
             <CardBody>
-              <RankingTable workspaceId={ws.id} initial={candidates} />
+              <RankingTable
+                workspaceId={ws.id}
+                initial={candidates}
+                statuses={statuses}
+              />
             </CardBody>
           </Card>
         </div>

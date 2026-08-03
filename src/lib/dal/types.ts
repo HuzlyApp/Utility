@@ -82,8 +82,30 @@ export interface Candidate {
   extraction_quality: string | null;
   recruiter_notes: string | null;
   verified_information: VerifiedRecruiterInputs;
+  current_status_id: string | null;
+  assigned_recruiter_id: string | null;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
+  last_status_changed_by_user_id: string | null;
+  last_status_changed_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface CandidateCrmFields {
+  current_status_id: string | null;
+  status_name: string | null;
+  status_color: string | null;
+  assigned_recruiter_id: string | null;
+  assigned_recruiter_name: string | null;
+  created_by_user_id: string | null;
+  created_by_name: string | null;
+  updated_by_user_id: string | null;
+  updated_by_name: string | null;
+  last_status_changed_by_user_id: string | null;
+  last_status_changed_by_name: string | null;
+  last_status_changed_at: string | null;
+  notes_count: number;
 }
 
 export interface EntityFile {
@@ -125,4 +147,50 @@ export interface RankedCandidateRow {
   updated_at: string;
   ai_provider: string | null;
   ai_model: string | null;
+  current_status_id: string | null;
+  status_name: string | null;
+  status_color: string | null;
+  last_status_changed_by_name: string | null;
+  last_status_changed_at: string | null;
+  assigned_recruiter_name: string | null;
+}
+
+export interface CandidateNoteRow {
+  id: string;
+  tenant_id: string;
+  candidate_id: string;
+  author_user_id: string | null;
+  author_name: string | null;
+  note_text: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  deleted_by_user_id: string | null;
+}
+
+export interface CandidateActivityRow {
+  id: string;
+  tenant_id: string;
+  candidate_id: string;
+  job_id: string | null;
+  performed_by_user_id: string | null;
+  performer_name: string | null;
+  action_type: string;
+  previous_value: string | null;
+  new_value: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CandidateStatusRow {
+  id: string;
+  tenant_id: string;
+  name: string;
+  color: string | null;
+  display_order: number;
+  is_default: boolean;
+  is_active: boolean;
+  created_by_user_id: string | null;
+  created_at: string;
+  updated_at: string;
 }

@@ -1,6 +1,7 @@
 import "server-only";
 import { getSql } from "./client";
 import { audit } from "./audit";
+import { seedDefaultStatusesForTenant } from "./statuses";
 import type { AppUser } from "@/lib/auth/session";
 
 export type TenantStatus = "ACTIVE" | "SUSPENDED" | "ARCHIVED";
@@ -143,6 +144,8 @@ export async function createTenant(params: {
       status: tenant.status,
     },
   });
+
+  await seedDefaultStatusesForTenant(String(tenant.id));
 
   return {
     id: String(tenant.id),
