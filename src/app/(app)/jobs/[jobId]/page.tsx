@@ -62,13 +62,13 @@ export default async function WorkspacePage({
           <Badge tone={ws.job_status === "OPEN" ? "green" : "slate"}>{ws.job_status}</Badge>
           <Link
             href={jobRoutes.edit(ws.id)}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            className="inline-flex h-9 items-center rounded-lg border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
           >
             Edit Job
           </Link>
           <a
             href={`/api/workspaces/${ws.id}/report`}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            className="inline-flex h-9 items-center rounded-lg border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50"
           >
             Download Comparison Report
           </a>
@@ -81,8 +81,8 @@ export default async function WorkspacePage({
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr,340px]">
-        <div className="space-y-6">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0 space-y-6">
           <div id="add-candidates">
             <AddCandidates workspaceId={ws.id} />
           </div>
@@ -104,7 +104,7 @@ export default async function WorkspacePage({
           </Card>
         </div>
 
-        <div className="space-y-6">
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-1">
           <Card>
             <CardHeader title="Job summary" />
             <CardBody className="space-y-2 text-sm">
@@ -124,13 +124,13 @@ export default async function WorkspacePage({
                 {sr.mandatory_requirements && (
                   <div>
                     <p className="mb-1 text-xs font-semibold uppercase text-slate-500">Mandatory</p>
-                    <p className="whitespace-pre-line text-slate-700">{sr.mandatory_requirements}</p>
+                    <p className="whitespace-pre-line break-words text-slate-700">{sr.mandatory_requirements}</p>
                   </div>
                 )}
                 {sr.preferred_requirements && (
                   <div>
                     <p className="mb-1 text-xs font-semibold uppercase text-slate-500">Preferred</p>
-                    <p className="whitespace-pre-line text-slate-700">{sr.preferred_requirements}</p>
+                    <p className="whitespace-pre-line break-words text-slate-700">{sr.preferred_requirements}</p>
                   </div>
                 )}
               </CardBody>
@@ -146,9 +146,11 @@ export default async function WorkspacePage({
 
 function SummaryRow({ label, value }: { label: string; value?: string | null }) {
   return (
-    <div className="flex items-center justify-between gap-3">
+    <div className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
       <span className="text-slate-400">{label}</span>
-      <span className="text-right font-medium text-slate-700">{value || "—"}</span>
+      <span className="break-words font-medium text-slate-700 sm:text-right">
+        {value || "—"}
+      </span>
     </div>
   );
 }

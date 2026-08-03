@@ -21,6 +21,7 @@ export function CandidateStatusSelect({
   updatedByName,
   updatedAt,
   showAttribution = true,
+  fullWidth = false,
   className,
   onChanged,
 }: {
@@ -32,6 +33,8 @@ export function CandidateStatusSelect({
   updatedByName?: string | null;
   updatedAt?: string | null;
   showAttribution?: boolean;
+  /** Stretch the select to fill its container (used in mobile cards). */
+  fullWidth?: boolean;
   className?: string;
   onChanged?: (next: {
     statusId: string;
@@ -88,7 +91,10 @@ export function CandidateStatusSelect({
           aria-hidden
         />
         <select
-          className="h-8 max-w-full rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-800 disabled:opacity-60"
+          className={cn(
+            "max-w-full rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-800 disabled:opacity-60",
+            fullWidth ? "h-9 w-full flex-1 min-w-0" : "h-8"
+          )}
           value={statusId ?? ""}
           disabled={saving}
           onClick={(e) => e.stopPropagation()}
@@ -112,7 +118,7 @@ export function CandidateStatusSelect({
         </select>
       </div>
       {showAttribution && (localBy || localAt) && (
-        <p className="text-[11px] text-slate-500">
+        <p className="break-words text-[11px] text-slate-500">
           Status updated by: {localBy || "—"}
           {localAt ? ` · ${formatTimestamp(localAt)}` : ""}
         </p>

@@ -22,6 +22,7 @@ import type { DuplicateConfirmationRequired } from "@/lib/duplicate-candidate/me
 import { onWorkspaceCandidatesChanged } from "@/lib/workspace-events";
 import { CompareDialog } from "./compare-dialog";
 import { DuplicateWarningDialog } from "./duplicate-warning-dialog";
+import { CandidateCard } from "./candidate-card";
 import {
   AiModelSelector,
   ModelBadge,
@@ -686,7 +687,7 @@ export function RankingTable({
         />
       )}
 
-      <div className="overflow-x-auto">
+      <div className="hidden lg:block overflow-x-auto">
         <table className="w-full min-w-[900px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
@@ -734,22 +735,24 @@ export function RankingTable({
                     </div>
                   </td>
                   <td className="px-2 py-2 font-medium text-slate-800">
-                    <Link
-                      href={`/candidates/${r.candidate_id}?w=${workspaceId}`}
-                      className="hover:text-brand-700"
-                    >
-                      {r.full_name || "Unnamed candidate"}
-                    </Link>
-                    {r.disposition && (
-                      <span className="ml-2 text-[10px] uppercase text-slate-400">
-                        {r.disposition.replace(/_/g, " ")}
-                      </span>
-                    )}
-                    {rowProgress && rowProgress.stage !== "completed" && (
-                      <p className="mt-0.5 text-[11px] font-normal text-blue-700">
-                        {rowProgress.label}
-                      </p>
-                    )}
+                    <div className="min-w-0">
+                      <Link
+                        href={`/candidates/${r.candidate_id}?w=${workspaceId}`}
+                        className="break-words hover:text-brand-700"
+                      >
+                        {r.full_name || "Unnamed candidate"}
+                      </Link>
+                      {r.disposition && (
+                        <span className="ml-2 text-[10px] uppercase text-slate-400">
+                          {r.disposition.replace(/_/g, " ")}
+                        </span>
+                      )}
+                      {rowProgress && rowProgress.stage !== "completed" && (
+                        <p className="mt-0.5 break-words text-[11px] font-normal text-blue-700">
+                          {rowProgress.label}
+                        </p>
+                      )}
+                    </div>
                   </td>
                   <td className="px-2 py-2">
                     {r.match_score != null ? (
@@ -855,9 +858,42 @@ export function RankingTable({
                 </tr>
               );
             })}
-          </tbody>
-        </table>
+           </tbody>
+         </table>
       </div>
+
+      {/* Mobile / tablet-portrait candidate cards. Renders the same data and
+          callbacks as the desktop table so analysis, compare-selection, notes,
+          stage updates, and open-candidate behaviour are identical. */}
+      <ul className="grid gap-3 lg:hidden">
+        {view.map((r, i) => {
+          const rowProgress = progressById[r.candidate_id];
+          const rowBusy =
+            inFlightRef.current.has(r.candidate_id) || r.status === "ANALYZING";
+          return (
+            <CandidateCard
+              key={r.candidate_id}
+              row={r}
+              index={i}
+              workspaceId={workspaceId}
+              statuses={statuses}
+              selected={!!selected[r.candidate_id]}
+              progress={rowProgress}
+              busy={rowBusy}
+              batchRunning={batchRunning}
+              onToggleSelect={toggleSelect}
+              onAnalyze={(id) => void analyzeSingle(id)}
+              onOpenNotes={(id, name) =>
+                setNotesFor({ candidateId: id, candidateName: name })
+              }
+              onStatusChanged={() => {
+                void refresh();
+                router.refresh();
+              }}
+            />
+          );
+        })}
+      </ul>
 
       {compareOpen && (
         <CompareDialog entries={selectedEntries} onClose={() => setCompareOpen(false)} />

@@ -325,14 +325,14 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
             e.preventDefault();
             if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
           }}
-          className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-6 text-center"
+          className="rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-5 text-center sm:p-6"
         >
           <p className="text-sm text-slate-600">Drag &amp; drop files, or</p>
-          <div className="mt-2 flex flex-wrap justify-center gap-2">
-            <Button type="button" variant="secondary" onClick={() => inputRef.current?.click()}>
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-2">
+            <Button type="button" variant="secondary" className="w-full" onClick={() => inputRef.current?.click()}>
               Select files
             </Button>
-            <Button type="button" variant="ghost" onClick={() => setPasteOpen((o) => !o)}>
+            <Button type="button" variant="ghost" className="w-full" onClick={() => setPasteOpen((o) => !o)}>
               Paste résumé text
             </Button>
           </div>
@@ -393,7 +393,7 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
                 const inWorkspace = matchesWorkspaceName(s.name);
                 return (
                   <div key={s.id} className="rounded-lg border border-slate-200 p-3">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {s.files.length > 0 && (
                         <input
                           type="checkbox"
@@ -405,7 +405,7 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
                       <TextInput
                         value={s.name}
                         onChange={(e) => setName(s.id, e.target.value)}
-                        className="h-8 max-w-xs text-sm"
+                        className="h-9 min-w-[10rem] flex-1 text-sm"
                       />
                       <Badge tone={STATUS_TONE[s.status]}>{s.status.replace(/_/g, " ")}</Badge>
                       {isDup && <Badge tone="amber">Possible duplicate</Badge>}
@@ -429,11 +429,11 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
                         {s.files.map((f, i) => (
                           <li
                             key={i}
-                            className="flex items-center gap-2 rounded bg-slate-50 px-2 py-1 text-xs text-slate-600"
+                            className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded bg-slate-50 px-2 py-1 text-xs text-slate-600"
                           >
                             <span className="text-slate-400">Page {i + 1}</span>
-                            <span className="truncate font-medium text-slate-700">{f.name}</span>
-                            <span className="text-slate-400">
+                            <span className="min-w-0 flex-1 truncate font-medium text-slate-700">{f.name}</span>
+                            <span className="break-words text-slate-400">
                               {extOf(f.name).toUpperCase()} · {niceSize(f.size)}
                               {IMAGE_EXTS.includes(extOf(f.name)) ? " · image" : ""}
                             </span>
@@ -465,7 +465,7 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
             </div>
 
             <div className="flex justify-end">
-              <Button onClick={uploadAll} disabled={uploading}>
+              <Button className="w-full sm:w-auto" onClick={uploadAll} disabled={uploading}>
                 {uploading ? "Uploading…" : "Upload & Add Candidates"}
               </Button>
             </div>

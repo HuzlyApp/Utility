@@ -30,6 +30,15 @@ const UPDATE_RESUME_DIALOG = readSrc(
   "src/components/candidate/update-resume-dialog.tsx"
 );
 const COMPARE_DIALOG = readSrc("src/components/workspace/compare-dialog.tsx");
+const JOB_PAGE = readSrc("src/app/(app)/jobs/[jobId]/page.tsx");
+const CANDIDATE_CARD = readSrc("src/components/workspace/candidate-card.tsx");
+const STATUS_SELECT = readSrc(
+  "src/components/candidate/candidate-status-select.tsx"
+);
+const JOB_DESCRIPTION_PANEL = readSrc(
+  "src/components/workspace/job-description-panel.tsx"
+);
+const ADD_CANDIDATES = readSrc("src/components/workspace/add-candidates.tsx");
 
 describe("responsive foundation (globals.css)", () => {
   it("guards the body against unintended horizontal page scrolling", () => {
@@ -140,5 +149,86 @@ describe("dense data tables", () => {
   it("candidate list table has a min-width so columns do not crush on mobile", () => {
     expect(CANDIDATE_LIST).toContain("overflow-x-auto");
     expect(CANDIDATE_LIST).toContain("min-w-[");
+  });
+});
+
+describe("job workspace page layout (/jobs/[jobId])", () => {
+  it("keeps the two-column desktop layout only at xl (1280px+) with a bounded main column", () => {
+    expect(JOB_PAGE).toContain("xl:grid-cols-[minmax(0,1fr)_320px]");
+    expect(JOB_PAGE).toContain("min-w-0");
+  });
+
+  it("reflows the job summary / description panels below the candidates on tablet and mobile", () => {
+    // Right-rail panels become a 2-col grid on tablet and stack on mobile.
+    expect(JOB_PAGE).toContain("md:grid-cols-2");
+    expect(JOB_PAGE).toContain("xl:grid-cols-1");
+  });
+
+  it("stacks job summary label/value rows on mobile instead of crowding one line", () => {
+    expect(JOB_PAGE).toContain("flex-col gap-0.5 sm:flex-row");
+    expect(JOB_PAGE).toContain("break-words");
+  });
+
+  it("uses touch-friendly header action buttons", () => {
+    expect(JOB_PAGE).toContain("h-9");
+  });
+});
+
+describe("candidate mobile cards", () => {
+  it("exposes a shared CandidateCard presentational component", () => {
+    expect(CANDIDATE_CARD).toContain("export function CandidateCard");
+    // Card is a list item so it can render inside a <ul>.
+    expect(CANDIDATE_CARD).toContain("<li");
+  });
+
+  it("renders score + model in the header and uses 44px action buttons", () => {
+    expect(CANDIDATE_CARD).toContain("scoreTone");
+    expect(CANDIDATE_CARD).toContain("ModelBadge");
+    expect(CANDIDATE_CARD).toContain("h-11");
+  });
+
+  it("actions live in a responsive 2-column grid at the bottom of the card", () => {
+    expect(CANDIDATE_CARD).toContain("grid grid-cols-2");
+    expect(CANDIDATE_CARD).toContain("Open candidate");
+  });
+
+  it("ranking table renders cards below the lg breakpoint and the table at lg+", () => {
+    expect(RANKING_TABLE).toContain("hidden lg:block");
+    expect(RANKING_TABLE).toContain("lg:hidden");
+    expect(RANKING_TABLE).toContain("CandidateCard");
+  });
+});
+
+describe("stage control and add-candidates responsiveness", () => {
+  it("CandidateStatusSelect supports a fullWidth mode for mobile cards", () => {
+    expect(STATUS_SELECT).toContain("fullWidth");
+    expect(STATUS_SELECT).toContain("w-full");
+  });
+
+  it("status audit text wraps long recruiter names", () => {
+    expect(STATUS_SELECT).toContain("break-words");
+  });
+
+  it("AddCandidates stacks upload actions full-width on mobile", () => {
+    expect(ADD_CANDIDATES).toContain("grid");
+    expect(ADD_CANDIDATES).toContain("grid-cols-1");
+    expect(ADD_CANDIDATES).toContain("sm:grid-cols-2");
+  });
+
+  it("AddCandidates primary upload button is full-width on mobile", () => {
+    expect(ADD_CANDIDATES).toContain("w-full sm:w-auto");
+  });
+});
+
+describe("job description panel", () => {
+  it("decodes common HTML entities and wraps long text", () => {
+    expect(JOB_DESCRIPTION_PANEL).toContain("decodeCommonEntities");
+    expect(JOB_DESCRIPTION_PANEL).toContain("&nbsp;");
+    expect(JOB_DESCRIPTION_PANEL).toContain("break-words");
+  });
+
+  it("exposes an accessible expand/collapse toggle only when content is long", () => {
+    expect(JOB_DESCRIPTION_PANEL).toContain("aria-expanded");
+    expect(JOB_DESCRIPTION_PANEL).toContain("View Full Description");
   });
 });

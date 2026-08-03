@@ -81,7 +81,7 @@ export function DeleteJobButton({
         disabled={busy}
         className={
           className ??
-          "rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+          "inline-flex h-9 items-center rounded-lg border border-red-200 px-3 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
         }
       >
         Delete
