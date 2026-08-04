@@ -223,6 +223,18 @@ export async function replaceAnalysisWithUpdatedResume(
     confidence: r.confidence,
   }));
 
+  // Snapshot recruiter verifications before requirements are replaced.
+  const preservedVerifications = (await sql`
+    SELECT requirement_text, recruiter_verified, recruiter_verification_note
+    FROM candidate_match_requirements
+    WHERE analysis_id = ${params.analysisId}
+      AND COALESCE(recruiter_verified, false) = true
+  `) as Array<{
+    requirement_text: string;
+    recruiter_verified: boolean;
+    recruiter_verification_note: string | null;
+  }>;
+
   const txResults = (await sql.transaction((tx) => [
     tx`
       WITH existing AS (
@@ -404,6 +416,18 @@ export async function replaceAnalysisWithUpdatedResume(
   const resumeVersion = txResults[0]?.[0]?.resume_version;
   if (!resumeVersion) {
     throw new Error("Failed to update analysis with the new resume.");
+  }
+
+  // Restore recruiter verifications onto matching requirement text.
+  for (const prev of preservedVerifications) {
+    await sql`
+      UPDATE candidate_match_requirements
+      SET recruiter_verified = ${prev.recruiter_verified},
+          recruiter_verification_note = ${prev.recruiter_verification_note},
+          updated_at = now()
+      WHERE analysis_id = ${params.analysisId}
+        AND requirement_text = ${prev.requirement_text}
+    `;
   }
 
   await logCandidateActivity({

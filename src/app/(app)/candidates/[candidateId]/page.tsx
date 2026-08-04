@@ -15,7 +15,9 @@ import { listCandidateStatuses } from "@/lib/dal/statuses";
 import { listCandidateNotes } from "@/lib/dal/notes";
 import { listCandidateActivity, getCandidateActivitySummary } from "@/lib/dal/activity";
 import { listTenantUsers } from "@/lib/dal/users";
+import { listAnalysisRequirements } from "@/lib/dal/requirements";
 import { CandidateDetail } from "@/components/candidate/candidate-detail";
+import type { VerificationState } from "@/components/candidate-match/qualification-table";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +45,7 @@ export default async function CandidateDetailPage({
     ? await getAnalysis(user, jmc.latest_analysis_id)
     : null;
 
-  const [files, screening, disposition, history, statuses, notes, activity, users, activitySummary] =
+  const [files, screening, disposition, history, statuses, notes, activity, users, activitySummary, requirementRows] =
     await Promise.all([
       listEntityFiles(user, "candidate", params.candidateId),
       workspaceId
@@ -58,7 +60,20 @@ export default async function CandidateDetailPage({
       listCandidateActivity(user, params.candidateId),
       listTenantUsers(user.tenantId),
       getCandidateActivitySummary(user, params.candidateId),
+      analysis
+        ? listAnalysisRequirements(user, analysis.id)
+        : Promise.resolve([]),
     ]);
+
+  const savedVerifications: VerificationState = {};
+  for (const row of requirementRows) {
+    if (!row.requirement_text) continue;
+    savedVerifications[row.requirement_text] = {
+      verified: Boolean(row.recruiter_verified),
+      note: row.recruiter_verification_note ?? "",
+      requirementId: row.id,
+    };
+  }
 
   const recruiters = users.filter(
     (u) => u.status === "ACTIVE" && u.role !== "SUPER_ADMIN"
@@ -132,6 +147,7 @@ export default async function CandidateDetailPage({
           question: s.question,
           answer: s.answer ?? "",
         }))}
+        savedVerifications={savedVerifications}
         disposition={disposition?.disposition ?? null}
         dispositionNotes={disposition?.notes ?? null}
         history={history}

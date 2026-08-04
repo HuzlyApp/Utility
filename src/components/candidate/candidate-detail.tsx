@@ -116,6 +116,7 @@ export function CandidateDetail({
   files,
   analysis,
   savedAnswers,
+  savedVerifications = {},
   disposition,
   dispositionNotes,
   history,
@@ -132,6 +133,7 @@ export function CandidateDetail({
   files: EntityFile[];
   analysis: AnalysisProps | null;
   savedAnswers: { question: string; answer: string }[];
+  savedVerifications?: VerificationState;
   disposition: string | null;
   dispositionNotes: string | null;
   history: {
@@ -221,7 +223,10 @@ export function CandidateDetail({
     };
   }, []);
 
-  const [verifications, setVerifications] = useState<VerificationState>({});
+  const [verifications, setVerifications] = useState<VerificationState>(() => ({
+    ...savedVerifications,
+  }));
+  const [savingRequirement, setSavingRequirement] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<number, string>>(() => {
     const map: Record<number, string> = {};
     if (analysis) {
@@ -479,6 +484,58 @@ export function CandidateDetail({
     }
   }
 
+  async function saveVerification(requirement: string) {
+    if (!analysis?.id) {
+      toast("No analysis to attach verification to.", "error");
+      return;
+    }
+    const entry = verifications[requirement];
+    const requirementId =
+      entry?.requirementId ?? savedVerifications[requirement]?.requirementId;
+    if (!requirementId) {
+      toast("Could not find this requirement in the database.", "error");
+      return;
+    }
+    const verified = entry?.verified ?? false;
+    const note = entry?.note ?? "";
+    setSavingRequirement(requirement);
+    try {
+      const res = await fetch(
+        `/api/candidate-match/${analysis.id}/requirements/verify`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            requirement_id: requirementId,
+            verified,
+            note,
+          }),
+        }
+      );
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error ?? "Save failed");
+      }
+      setVerifications((p) => ({
+        ...p,
+        [requirement]: {
+          verified,
+          note: verified ? note : "",
+          requirementId,
+        },
+      }));
+      toast(
+        verified ? "Qualification marked as verified." : "Verification cleared.",
+        "success"
+      );
+      router.refresh();
+    } catch {
+      toast("Could not save verification.", "error");
+    } finally {
+      setSavingRequirement(null);
+    }
+  }
+
   async function recordDisposition(d: DashboardDisposition, dispNotes: string) {
     if (!workspaceId) {
       toast("Attach this candidate to a job first.", "error");
@@ -683,12 +740,31 @@ export function CandidateDetail({
               onToggleVerified={(req) =>
                 setVerifications((p) => ({
                   ...p,
-                  [req]: { verified: !(p[req]?.verified ?? false), note: p[req]?.note ?? "" },
+                  [req]: {
+                    verified: !(p[req]?.verified ?? false),
+                    note: p[req]?.note ?? "",
+                    requirementId:
+                      p[req]?.requirementId ??
+                      savedVerifications[req]?.requirementId ??
+                      null,
+                  },
                 }))
               }
               onNote={(req, note) =>
-                setVerifications((p) => ({ ...p, [req]: { verified: p[req]?.verified ?? true, note } }))
+                setVerifications((p) => ({
+                  ...p,
+                  [req]: {
+                    verified: p[req]?.verified ?? true,
+                    note,
+                    requirementId:
+                      p[req]?.requirementId ??
+                      savedVerifications[req]?.requirementId ??
+                      null,
+                  },
+                }))
               }
+              onSaveVerification={saveVerification}
+              savingRequirement={savingRequirement}
             />
             <div className="grid gap-6 md:grid-cols-2">
               <StrengthsCard strengths={r.strengths} />

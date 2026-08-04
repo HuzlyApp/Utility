@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
-import { Badge, Card, CardBody, CardHeader, TextInput } from "@/components/ui/primitives";
+import { Badge, Button, Card, CardBody, CardHeader, TextInput } from "@/components/ui/primitives";
 import {
   ChevronDownIcon,
   SearchIcon,
@@ -15,6 +15,8 @@ import type { AiRequirement, AiScreeningQuestion } from "@/lib/schema";
 export interface VerificationEntry {
   verified: boolean;
   note: string;
+  /** DB row id from candidate_match_requirements; required to persist. */
+  requirementId?: string | null;
 }
 export type VerificationState = Record<string, VerificationEntry>;
 
@@ -41,12 +43,17 @@ export function QualificationTable({
   verifications,
   onToggleVerified,
   onNote,
+  onSaveVerification,
+  savingRequirement,
 }: {
   requirements: AiRequirement[];
   questions: AiScreeningQuestion[];
   verifications: VerificationState;
   onToggleVerified: (requirement: string) => void;
   onNote: (requirement: string, note: string) => void;
+  /** When provided, shows a Save button that persists verification to the DB. */
+  onSaveVerification?: (requirement: string) => void | Promise<void>;
+  savingRequirement?: string | null;
 }) {
   const [filter, setFilter] = useState<FilterKey>("all");
   const [query, setQuery] = useState("");
@@ -206,6 +213,23 @@ export function QualificationTable({
                           value={v.note}
                           onChange={(e) => onNote(req.requirement, e.target.value)}
                         />
+                      )}
+                      {onSaveVerification && (
+                        <div className="mt-2 flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={
+                              !v?.requirementId ||
+                              savingRequirement === req.requirement
+                            }
+                            onClick={() => onSaveVerification(req.requirement)}
+                          >
+                            {savingRequirement === req.requirement
+                              ? "Saving…"
+                              : "Save verification"}
+                          </Button>
+                        </div>
                       )}
                     </div>
                   </div>
