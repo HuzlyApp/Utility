@@ -12,6 +12,7 @@ import {
 } from "@/lib/dal/candidates";
 import { getEntityImageBytes } from "@/lib/dal/fileStore";
 import { saveCandidateAnalysis } from "@/lib/dal/analyses";
+import { copyRequirementVerifications } from "@/lib/dal/requirements";
 import { performAnalysis } from "@/lib/analyze";
 import { visionTranscribe } from "@/lib/files";
 import {
@@ -372,6 +373,8 @@ export async function POST(
             })
           );
 
+          const previousAnalysisId = jmc.latest_analysis_id;
+
           const analysisId = await saveCandidateAnalysis({
             user,
             workspaceId: params.workspaceId,
@@ -391,6 +394,14 @@ export async function POST(
               .map((m) => m.analysis_id)
               .filter((id): id is string => Boolean(id)),
           });
+
+          // Carry recruiter verifications forward when requirement text matches.
+          if (previousAnalysisId && previousAnalysisId !== analysisId) {
+            await copyRequirementVerifications({
+              fromAnalysisId: previousAnalysisId,
+              toAnalysisId: analysisId,
+            });
+          }
 
           // Status becomes ANALYZED only after the analysis row exists.
           await setLatestAnalysis(user, jmc.id, analysisId);
