@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { detectCandidateNameFromResumeText, namesMatch } from "@/lib/resume-name";
+import {
+  detectCandidateNameFromResumeText,
+  displayCandidateName,
+  namesMatch,
+} from "@/lib/resume-name";
 
 describe("detectCandidateNameFromResumeText", () => {
   it("detects a name from top resume lines", () => {
@@ -26,5 +30,25 @@ describe("namesMatch", () => {
 
   it("does not match different names", () => {
     expect(namesMatch("Jane Doe", "John Doe")).toBe(false);
+  });
+});
+
+describe("displayCandidateName", () => {
+  it("strips a leading Resume prefix case-insensitively", () => {
+    expect(displayCandidateName("ResumeDavidKago")).toBe("DavidKago");
+    expect(displayCandidateName("ResumeLindaCorbell")).toBe("LindaCorbell");
+    expect(displayCandidateName("RESUMEjaneDoe")).toBe("janeDoe");
+    expect(displayCandidateName("resume Smith")).toBe("Smith");
+  });
+
+  it("leaves names without the prefix unchanged", () => {
+    expect(displayCandidateName("DavidKago")).toBe("DavidKago");
+    expect(displayCandidateName("Jane Resume")).toBe("Jane Resume");
+  });
+
+  it("falls back for empty or null names", () => {
+    expect(displayCandidateName(null)).toBe("Unnamed candidate");
+    expect(displayCandidateName("")).toBe("Unnamed candidate");
+    expect(displayCandidateName("Resume")).toBe("Resume");
   });
 });

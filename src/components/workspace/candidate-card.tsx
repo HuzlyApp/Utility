@@ -10,6 +10,7 @@ import {
   type StatusOption,
 } from "@/components/candidate/candidate-status-select";
 import { ModelBadge } from "@/components/workspace/ai-model-selector";
+import { displayCandidateName } from "@/lib/resume-name";
 
 /**
  * Presentational candidate card used on narrow screens (mobile + tablet
@@ -110,7 +111,7 @@ export function CandidateCard({
   onStatusChanged: () => void;
 }) {
   const candidateHref = `/candidates/${row.candidate_id}?w=${workspaceId}`;
-  const name = row.full_name || "Unnamed candidate";
+  const name = displayCandidateName(row.full_name);
   const canCompare = Boolean(row.latest_analysis_id);
   const showProgress = progress && progress.stage !== "completed";
 

@@ -36,6 +36,7 @@ import {
 } from "@/components/candidate/candidate-status-select";
 import { CandidateNotesDialog } from "@/components/candidate/candidate-notes-dialog";
 import type { CrmActorRole } from "@/lib/candidate-crm";
+import { displayCandidateName } from "@/lib/resume-name";
 
 type SortKey = "score" | "name" | "category" | "readiness" | "verification" | "date";
 
@@ -512,7 +513,9 @@ export function RankingTable({
     let list = [...rows];
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      list = list.filter((r) => (r.full_name ?? "").toLowerCase().includes(q));
+      list = list.filter((r) =>
+        displayCandidateName(r.full_name).toLowerCase().includes(q)
+      );
     }
     if (catFilter) list = list.filter((r) => r.match_category === catFilter);
     if (readyFilter) list = list.filter((r) => r.submission_readiness === readyFilter);
@@ -526,7 +529,12 @@ export function RankingTable({
     list.sort((a, b) => {
       switch (sortKey) {
         case "name":
-          return dir * (a.full_name ?? "").localeCompare(b.full_name ?? "");
+          return (
+            dir *
+            displayCandidateName(a.full_name).localeCompare(
+              displayCandidateName(b.full_name)
+            )
+          );
         case "category":
           return dir * (a.match_category ?? "").localeCompare(b.match_category ?? "");
         case "readiness":
@@ -555,7 +563,7 @@ export function RankingTable({
     .filter((r) => selected[r.candidate_id] && r.latest_analysis_id)
     .map((r) => ({
       analysisId: r.latest_analysis_id as string,
-      name: r.full_name ?? "Unnamed candidate",
+      name: displayCandidateName(r.full_name),
     }));
 
   function toggleSelect(candidateId: string, hasAnalysis: boolean) {
@@ -585,9 +593,12 @@ export function RankingTable({
     aggregatePercent < 100 &&
     Object.values(progressById).some((p) => p.stage === "analyzing");
 
+  const filterControlClass =
+    "h-9 w-full min-w-0 rounded-lg border border-slate-300 bg-white px-2 text-sm lg:h-8";
+
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
         <AiModelSelector
           value={optionId}
           onChange={setOptionId}
@@ -607,71 +618,76 @@ export function RankingTable({
             Compare Selected ({selectedEntries.length})
           </Button>
         )}
-        <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 lg:ml-auto lg:w-auto lg:flex lg:flex-wrap lg:items-center">
-          <input
-            placeholder="Search name…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-9 w-full rounded-lg border border-slate-300 px-2 text-sm lg:h-8"
-          />
-          <select
-            value={catFilter}
-            onChange={(e) => setCatFilter(e.target.value)}
-            className="h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm lg:h-8"
-          >
-            <option value="">All categories</option>
-            {categories.map((c) => (
-              <option key={c} value={c}>
-                {DISPLAY_CATEGORY[c as MatchCategory] ?? c}
+      </div>
+
+      <div className="grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(0,2fr)_repeat(4,minmax(0,1fr))] lg:items-center">
+        <input
+          placeholder="Search by candidate name"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          aria-label="Search by candidate name"
+          className={`${filterControlClass} sm:col-span-2 lg:col-span-1`}
+        />
+        <select
+          value={catFilter}
+          onChange={(e) => setCatFilter(e.target.value)}
+          aria-label="Filter by category"
+          className={filterControlClass}
+        >
+          <option value="">All categories</option>
+          {categories.map((c) => (
+            <option key={c} value={c}>
+              {DISPLAY_CATEGORY[c as MatchCategory] ?? c}
+            </option>
+          ))}
+        </select>
+        <select
+          value={readyFilter}
+          onChange={(e) => setReadyFilter(e.target.value)}
+          aria-label="Filter by readiness"
+          className={filterControlClass}
+        >
+          <option value="">All readiness</option>
+          {Object.entries(READINESS_LABEL).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          aria-label="Filter by stage"
+          className={filterControlClass}
+        >
+          <option value="">All stages</option>
+          <option value="__none__">No stage</option>
+          {statuses
+            .filter((s) => s.is_active !== false)
+            .map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
               </option>
             ))}
-          </select>
-          <select
-            value={readyFilter}
-            onChange={(e) => setReadyFilter(e.target.value)}
-            className="h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm lg:h-8"
-          >
-            <option value="">All readiness</option>
-            {Object.entries(READINESS_LABEL).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            aria-label="Filter by stage"
-            className="h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm lg:h-8"
-          >
-            <option value="">All stages</option>
-            <option value="__none__">No stage</option>
-            {statuses
-              .filter((s) => s.is_active !== false)
-              .map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-          </select>
-          <select
-            value={`${sortKey}:${sortDir}`}
-            onChange={(e) => {
-              const [k, d] = e.target.value.split(":");
-              setSortKey(k as SortKey);
-              setSortDir(d as "asc" | "desc");
-            }}
-            className="col-span-2 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-sm sm:col-span-1 lg:h-8"
-          >
-            <option value="score:desc">Score (high→low)</option>
-            <option value="score:asc">Score (low→high)</option>
-            <option value="name:asc">Name (A→Z)</option>
-            <option value="category:asc">Category</option>
-            <option value="readiness:asc">Readiness</option>
-            <option value="verification:desc">Verification needs</option>
-            <option value="date:desc">Analysis date</option>
-          </select>
-        </div>
+        </select>
+        <select
+          value={`${sortKey}:${sortDir}`}
+          onChange={(e) => {
+            const [k, d] = e.target.value.split(":");
+            setSortKey(k as SortKey);
+            setSortDir(d as "asc" | "desc");
+          }}
+          aria-label="Sort by score"
+          className={`${filterControlClass} sm:col-span-2 lg:col-span-1`}
+        >
+          <option value="score:desc">Score (high→low)</option>
+          <option value="score:asc">Score (low→high)</option>
+          <option value="name:asc">Name (A→Z)</option>
+          <option value="category:asc">Category</option>
+          <option value="readiness:asc">Readiness</option>
+          <option value="verification:desc">Verification needs</option>
+          <option value="date:desc">Analysis date</option>
+        </select>
       </div>
 
       {analyzing && (
@@ -740,7 +756,7 @@ export function RankingTable({
                         href={`/candidates/${r.candidate_id}?w=${workspaceId}`}
                         className="break-words hover:text-brand-700"
                       >
-                        {r.full_name || "Unnamed candidate"}
+                        {displayCandidateName(r.full_name)}
                       </Link>
                       {r.disposition && (
                         <span className="ml-2 text-[10px] uppercase text-slate-400">
@@ -836,7 +852,7 @@ export function RankingTable({
                         onClick={() =>
                           setNotesFor({
                             candidateId: r.candidate_id,
-                            candidateName: r.full_name || "Unnamed candidate",
+                            candidateName: displayCandidateName(r.full_name),
                           })
                         }
                       >

@@ -9,6 +9,7 @@ import type { DashboardCandidateRow } from "@/lib/dal/candidates";
 import type { StatusOption } from "@/components/candidate/candidate-status-select";
 import { CandidateStatusSelect } from "@/components/candidate/candidate-status-select";
 import { formatTimestamp } from "@/lib/client/candidate-crm";
+import { displayCandidateName } from "@/lib/resume-name";
 
 function scoreTone(score: number | null): string {
   if (score == null) return "text-slate-400";
@@ -62,7 +63,7 @@ export function CandidateList({
                     href={candidateRoutes.detail(row.candidate_id, row.workspace_id)}
                     className="font-medium text-slate-800 hover:text-brand-700"
                   >
-                    {row.full_name || "Unnamed candidate"}
+                    {displayCandidateName(row.full_name)}
                   </Link>
                   <p className="text-xs text-slate-400">
                     {[row.specialty, row.location].filter(Boolean).join(" · ") || "—"}

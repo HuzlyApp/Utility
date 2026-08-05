@@ -65,3 +65,16 @@ export function namesMatch(existing: string | null, detected: string | null): bo
   const b = normalizeCandidateName(detected);
   return Boolean(a && b && a === b);
 }
+
+/**
+ * Display-only cleanup for candidate names derived from resume filenames
+ * (e.g. "ResumeDavidKago" → "DavidKago"). Does not mutate stored data.
+ * Strips a leading "Resume" prefix case-insensitively; otherwise returns the
+ * trimmed name or "Unnamed candidate" when empty.
+ */
+export function displayCandidateName(name: string | null | undefined): string {
+  const raw = (name ?? "").trim();
+  if (!raw) return "Unnamed candidate";
+  const stripped = raw.replace(/^resume/i, "").trim();
+  return stripped || raw;
+}
