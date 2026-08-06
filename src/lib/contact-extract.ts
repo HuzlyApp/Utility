@@ -9,6 +9,7 @@ export type ContactSource = "RESUME" | "MANUAL" | "MANUAL_CORRECTED";
 /** Canonical contact-extraction lifecycle statuses. */
 export type ContactExtractionStatus =
   | "pending"
+  | "queued"
   | "processing"
   | "completed"
   | "not_found"
@@ -52,7 +53,10 @@ export function normalizeContactExtractionStatus(
   switch (raw) {
     case "pending":
     case "not_processed":
+    case "not_started":
       return "pending";
+    case "queued":
+      return "queued";
     case "processing":
       return "processing";
     case "completed":
@@ -61,6 +65,7 @@ export function normalizeContactExtractionStatus(
     case "not_found":
       return "not_found";
     case "failed":
+    case "stale":
       return "failed";
     default:
       return "pending";
@@ -73,7 +78,16 @@ export function isContactExtractionInFlight(
   nowMs: number = Date.now()
 ): boolean {
   const normalized = normalizeContactExtractionStatus(status);
-  if (normalized !== "pending" && normalized !== "processing") return false;
+  if (
+    normalized !== "pending" &&
+    normalized !== "queued" &&
+    normalized !== "processing"
+  ) {
+    return false;
+  }
+  if (!startedAt && (normalized === "pending" || normalized === "queued")) {
+    return true;
+  }
   if (!startedAt) return true;
   const started = new Date(startedAt).getTime();
   if (Number.isNaN(started)) return true;
@@ -86,7 +100,13 @@ export function isContactExtractionStale(
   nowMs: number = Date.now()
 ): boolean {
   const normalized = normalizeContactExtractionStatus(status);
-  if (normalized !== "pending" && normalized !== "processing") return false;
+  if (
+    normalized !== "pending" &&
+    normalized !== "queued" &&
+    normalized !== "processing"
+  ) {
+    return false;
+  }
   if (!startedAt) return false;
   const started = new Date(startedAt).getTime();
   if (Number.isNaN(started)) return false;
@@ -241,7 +261,9 @@ export function displayContactValue(params: {
   if (isContactExtractionStale(status, params.startedAt)) {
     return "Did not complete";
   }
-  if (status === "pending" || status === "processing") return "Extracting…";
+  if (status === "pending" || status === "queued" || status === "processing") {
+    return "Extracting…";
+  }
   if (status === "not_found") return "Not found";
   if (status === "failed") return "—";
   // completed with no value for this field

@@ -7,7 +7,7 @@ import { AuthError, type AppUser } from "@/lib/auth/session";
 import type { VerifiedRecruiterInputs } from "@/lib/types";
 import { normalizeCandidateName, normalizeEmail, normalizePhone } from "@/lib/duplicate-candidate/normalize";
 import { mapStatusNameToActivityType, sourceFromRole } from "@/lib/recruiter-activity";
-import { buildStatusChangeMetadata } from "@/lib/candidate-crm";
+import { buildStatusChangeMetadata, toCandidateSearchPattern, toPhoneDigitsSearchPattern } from "@/lib/candidate-crm";
 import { canViewCandidateContact } from "@/lib/auth/rbac";
 import {
   canOverwriteContactWithResume,
@@ -362,7 +362,7 @@ export async function finalizeStaleContactExtractions(
       updated_at = now()
     WHERE tenant_id = ${tenantId}
       AND lower(COALESCE(contact_extraction_status, 'pending')) IN (
-        'pending', 'processing', 'not_processed'
+        'pending', 'processing', 'not_processed', 'queued'
       )
       AND contact_extraction_started_at IS NOT NULL
       AND contact_extraction_started_at < ${cutoff}::timestamptz
@@ -449,6 +449,103 @@ export async function resolvePendingContactExtractions(
       workspaceId: opts?.workspaceId,
     });
   }
+}
+
+/**
+ * Background contact extraction for the Candidates page / tenant backfill.
+ * Claims eligible rows (idempotent: skips in-flight processing), then extracts
+ * from stored résumé text without blocking the list SSR path.
+ */
+export async function processEligibleContactExtractions(
+  user: AppUser,
+  opts?: {
+    limit?: number;
+    /** Prefer these visible IDs first (still capped by limit). */
+    candidateIds?: string[];
+  }
+): Promise<{ processed: number; claimedIds: string[] }> {
+  await finalizeStaleContactExtractions(user, opts?.candidateIds);
+
+  const sql = getSql();
+  const tenantId = tenantIdOf(user);
+  const limit = Math.max(1, Math.min(opts?.limit ?? 25, 100));
+  const preferIds = (opts?.candidateIds ?? []).filter(Boolean);
+  const cutoff = new Date(Date.now() - CONTACT_EXTRACTION_STALE_MS).toISOString();
+
+  // Prefer visible IDs, then fill remaining with tenant-wide eligible rows.
+  const claimed = (await sql`
+    WITH eligible AS (
+      SELECT c.id, c.extracted_resume_text,
+        CASE
+          WHEN ${preferIds.length > 0}::boolean
+           AND c.id = ANY(${preferIds}::uuid[])
+          THEN 0
+          ELSE 1
+        END AS prefer_rank
+      FROM candidates c
+      WHERE c.tenant_id = ${tenantId}
+        AND NULLIF(BTRIM(COALESCE(c.extracted_resume_text, '')), '') IS NOT NULL
+        AND COALESCE(c.contact_extraction_attempts, 0) < ${CONTACT_EXTRACTION_MAX_ATTEMPTS}
+        AND (
+          lower(COALESCE(c.contact_extraction_status, 'pending')) IN (
+            'pending', 'not_processed', 'queued'
+          )
+          OR (
+            lower(c.contact_extraction_status) = 'failed'
+            AND COALESCE(c.contact_extraction_attempts, 0) < ${CONTACT_EXTRACTION_MAX_ATTEMPTS}
+          )
+          OR (
+            lower(c.contact_extraction_status) = 'processing'
+            AND c.contact_extraction_started_at IS NOT NULL
+            AND c.contact_extraction_started_at < ${cutoff}::timestamptz
+          )
+        )
+        AND lower(COALESCE(c.contact_extraction_status, 'pending')) NOT IN (
+          'completed', 'not_found', 'extracted'
+        )
+        AND (
+          NULLIF(BTRIM(COALESCE(c.email, '')), '') IS NULL
+          OR NULLIF(BTRIM(COALESCE(c.phone, '')), '') IS NULL
+          OR lower(COALESCE(c.contact_extraction_status, 'pending')) IN (
+            'pending', 'not_processed', 'queued', 'failed'
+          )
+        )
+      ORDER BY prefer_rank ASC, c.updated_at DESC
+      LIMIT ${limit}
+    )
+    UPDATE candidates c SET
+      contact_extraction_status = ${"queued"},
+      contact_extraction_error = ${null},
+      updated_at = now()
+    FROM eligible e
+    WHERE c.id = e.id
+      AND c.tenant_id = ${tenantId}
+      AND lower(COALESCE(c.contact_extraction_status, 'pending')) NOT IN (
+        'processing'
+      )
+    RETURNING c.id, c.extracted_resume_text
+  `) as Array<{ id: string; extracted_resume_text: string | null }>;
+
+  const toProcess = claimed;
+  const claimedIds: string[] = [];
+
+  for (const row of toProcess) {
+    claimedIds.push(row.id);
+    console.info("[contact-extract] background_start", {
+      candidateId: row.id,
+    });
+    await applyResumeContactExtraction(user, row.id, row.extracted_resume_text, {
+      workspaceId: null,
+      fileType: "stored-text",
+    });
+  }
+
+  console.info("[contact-extract] background_batch", {
+    processed: claimedIds.length,
+    limit,
+  });
+
+  return { processed: claimedIds.length, claimedIds };
 }
 
 export interface CandidateDetailRow extends Candidate {
@@ -930,6 +1027,11 @@ export interface DashboardCandidateRow {
   created_by_user_id: string | null;
   created_by_name: string | null;
   notes_count: number;
+  contact_extraction_status: string | null;
+  contact_extraction_started_at: string | null;
+  contact_extraction_completed_at: string | null;
+  contact_extraction_error: string | null;
+  contact_extraction_attempts: number;
 }
 
 export interface DashboardCandidateFilters {
@@ -943,6 +1045,10 @@ export interface DashboardCandidateFilters {
   dateFrom?: string;
   dateTo?: string;
   mine?: boolean;
+  /** Free-text search (name, job, status, recruiter; contact when allowed). */
+  search?: string;
+  /** When false, email/phone are excluded from search matching. */
+  searchContact?: boolean;
 }
 
 /**
@@ -966,6 +1072,9 @@ export async function listDashboardCandidates(
   const workspaceId = opts?.workspaceId ?? null;
   const dateFrom = opts?.dateFrom ?? null;
   const dateTo = opts?.dateTo ?? null;
+  const searchPattern = toCandidateSearchPattern(opts?.search);
+  const phoneDigitsPattern = toPhoneDigitsSearchPattern(opts?.search);
+  const searchContact = opts?.searchContact !== false;
   const analysisFiltered = Boolean(matchCategory || submissionReadiness);
 
   if (!analysisFiltered) {
@@ -1041,7 +1150,12 @@ export async function listDashboardCandidates(
         (
           SELECT COUNT(*)::int FROM candidate_notes n
           WHERE n.candidate_id = c.id AND n.tenant_id = c.tenant_id AND n.deleted_at IS NULL
-        ) AS notes_count
+        ) AS notes_count,
+        c.contact_extraction_status,
+        c.contact_extraction_started_at,
+        c.contact_extraction_completed_at,
+        c.contact_extraction_error,
+        COALESCE(c.contact_extraction_attempts, 0) AS contact_extraction_attempts
       FROM candidates c
       LEFT JOIN candidate_statuses cs ON cs.id = c.current_status_id
       LEFT JOIN user_profiles ar ON ar.user_id = c.assigned_recruiter_id
@@ -1074,6 +1188,41 @@ export async function listDashboardCandidates(
         )
         AND (${dateFrom}::timestamptz IS NULL OR c.updated_at >= ${dateFrom}::timestamptz)
         AND (${dateTo}::timestamptz IS NULL OR c.updated_at <= ${dateTo}::timestamptz)
+        AND (
+          ${searchPattern}::text IS NULL
+          OR c.full_name ILIKE ${searchPattern}
+          OR COALESCE(c.normalized_full_name, '') ILIKE ${searchPattern}
+          OR (
+            ${searchContact} = true
+            AND (
+              COALESCE(c.email, '') ILIKE ${searchPattern}
+              OR COALESCE(c.email_normalized, '') ILIKE ${searchPattern}
+              OR COALESCE(c.phone, '') ILIKE ${searchPattern}
+              OR (
+                ${phoneDigitsPattern}::text IS NOT NULL
+                AND regexp_replace(
+                  COALESCE(c.phone_normalized, c.phone, ''),
+                  '[^0-9]',
+                  '',
+                  'g'
+                ) LIKE ${phoneDigitsPattern}
+              )
+            )
+          )
+          OR COALESCE(cs.name, '') ILIKE ${searchPattern}
+          OR COALESCE(ar.full_name, ar.email, '') ILIKE ${searchPattern}
+          OR EXISTS (
+            SELECT 1
+            FROM job_match_candidates jmc_s
+            JOIN job_match_workspaces w_s ON w_s.id = jmc_s.workspace_id
+            WHERE jmc_s.candidate_id = c.id
+              AND w_s.tenant_id = ${tenantId}
+              AND (
+                COALESCE(w_s.job_title, '') ILIKE ${searchPattern}
+                OR COALESCE(w_s.job_ref, '') ILIKE ${searchPattern}
+              )
+          )
+        )
       ORDER BY c.updated_at DESC
     `) as DashboardCandidateRow[];
     return redactCandidateContact(rows, user.role);
@@ -1106,7 +1255,12 @@ export async function listDashboardCandidates(
       (
         SELECT COUNT(*)::int FROM candidate_notes n
         WHERE n.candidate_id = c.id AND n.tenant_id = c.tenant_id AND n.deleted_at IS NULL
-      ) AS notes_count
+      ) AS notes_count,
+      c.contact_extraction_status,
+      c.contact_extraction_started_at,
+      c.contact_extraction_completed_at,
+      c.contact_extraction_error,
+      COALESCE(c.contact_extraction_attempts, 0) AS contact_extraction_attempts
     FROM job_match_candidates jmc
     JOIN candidates c ON c.id = jmc.candidate_id
     JOIN job_match_workspaces w ON w.id = jmc.workspace_id
@@ -1139,6 +1293,32 @@ export async function listDashboardCandidates(
       AND (${workspaceId}::uuid IS NULL OR jmc.workspace_id = ${workspaceId}::uuid)
       AND (${dateFrom}::timestamptz IS NULL OR c.updated_at >= ${dateFrom}::timestamptz)
       AND (${dateTo}::timestamptz IS NULL OR c.updated_at <= ${dateTo}::timestamptz)
+      AND (
+        ${searchPattern}::text IS NULL
+        OR c.full_name ILIKE ${searchPattern}
+        OR COALESCE(c.normalized_full_name, '') ILIKE ${searchPattern}
+        OR (
+          ${searchContact} = true
+          AND (
+            COALESCE(c.email, '') ILIKE ${searchPattern}
+            OR COALESCE(c.email_normalized, '') ILIKE ${searchPattern}
+            OR COALESCE(c.phone, '') ILIKE ${searchPattern}
+            OR (
+              ${phoneDigitsPattern}::text IS NOT NULL
+              AND regexp_replace(
+                COALESCE(c.phone_normalized, c.phone, ''),
+                '[^0-9]',
+                '',
+                'g'
+              ) LIKE ${phoneDigitsPattern}
+            )
+          )
+        )
+        OR COALESCE(cs.name, '') ILIKE ${searchPattern}
+        OR COALESCE(ar.full_name, ar.email, '') ILIKE ${searchPattern}
+        OR COALESCE(w.job_title, '') ILIKE ${searchPattern}
+        OR COALESCE(w.job_ref, '') ILIKE ${searchPattern}
+      )
     ORDER BY a.overall_match_score DESC NULLS LAST, c.full_name ASC
   `) as DashboardCandidateRow[];
   return redactCandidateContact(rows, user.role);
@@ -1148,12 +1328,23 @@ function redactCandidateContact(
   rows: DashboardCandidateRow[],
   role: AppUser["role"]
 ): DashboardCandidateRow[] {
-  if (canViewCandidateContact(role)) return rows;
-  return rows.map((row) => ({
-    ...row,
-    email: null,
-    phone: null,
-  }));
+  return rows.map((row) => {
+    const base: DashboardCandidateRow = {
+      ...row,
+      contact_extraction_status: row.contact_extraction_status ?? "pending",
+      contact_extraction_started_at: row.contact_extraction_started_at ?? null,
+      contact_extraction_completed_at: row.contact_extraction_completed_at ?? null,
+      contact_extraction_error: row.contact_extraction_error ?? null,
+      contact_extraction_attempts: Number(row.contact_extraction_attempts ?? 0),
+    };
+    if (canViewCandidateContact(role)) return base;
+    return {
+      ...base,
+      email: null,
+      phone: null,
+      contact_extraction_error: null,
+    };
+  });
 }
 
 // Resolves a workspace this candidate belongs to (used when the detail page is

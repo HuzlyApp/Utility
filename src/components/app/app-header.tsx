@@ -58,7 +58,7 @@ export function AppHeader({
       ? [{ href: "/recruiter-activity", label: "Recruiter Activity" }]
       : []),
     ...(role === "TENANT_ADMIN" ? [{ href: "/users", label: "Users" }] : []),
-    ...(role === "TENANT_ADMIN" ? [{ href: "/settings", label: "Settings" }] : []),
+    { href: "/settings", label: "Settings" },
   ];
 
   return (

@@ -127,6 +127,36 @@ export async function setUserStatus(params: {
   });
 }
 
+/** Update the authenticated user's own display name. */
+export async function updateOwnFullName(params: {
+  user: AppUser;
+  fullName: string;
+}): Promise<{ full_name: string }> {
+  const fullName = params.fullName.trim();
+  if (!fullName) {
+    throw new Error("Name is required.");
+  }
+  if (fullName.length > 120) {
+    throw new Error("Name must be 120 characters or fewer.");
+  }
+
+  const sql = getSql();
+  await sql`
+    UPDATE user_profiles
+    SET full_name = ${fullName}, updated_at = now()
+    WHERE user_id = ${params.user.id}
+  `;
+  await audit({
+    actorUserId: params.user.id,
+    tenantId: params.user.tenantId ?? undefined,
+    entityType: "user",
+    entityId: params.user.id,
+    action: "USER_PROFILE_UPDATED",
+    newValue: { full_name: fullName },
+  });
+  return { full_name: fullName };
+}
+
 /**
  * Permanently deletes a tenant user from app + Neon Auth.
  * Clears relational user links in the tenant, removes credentials/sessions,

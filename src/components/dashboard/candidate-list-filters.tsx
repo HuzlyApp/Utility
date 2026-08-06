@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import type { StatusOption } from "@/components/candidate/candidate-status-select";
+import { cn } from "@/lib/cn";
 
 export interface RecruiterOption {
   user_id: string;
@@ -29,11 +30,11 @@ function Select({
 }) {
   return (
     <label className="block min-w-[140px] flex-1">
-      <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
+      <span className="mb-0.5 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
         {label}
       </span>
       <select
-        className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-sm sm:h-9"
+        className="h-[38px] w-full rounded-md border border-slate-300 bg-white px-2 text-[13px] text-slate-800 sm:h-10 sm:text-sm"
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >
@@ -42,6 +43,17 @@ function Select({
     </label>
   );
 }
+
+const FILTER_KEYS = [
+  "status",
+  "assigned",
+  "mine",
+  "createdBy",
+  "updatedBy",
+  "job",
+  "from",
+  "to",
+] as const;
 
 export function CandidateListFilters({
   statuses,
@@ -72,11 +84,26 @@ export function CandidateListFilters({
     [pathname, router, searchParams]
   );
 
+  const hasActiveFilters = useMemo(
+    () => FILTER_KEYS.some((key) => Boolean(searchParams.get(key))),
+    [searchParams]
+  );
+
+  const clearFiltersHref = useMemo(() => {
+    const params = new URLSearchParams();
+    const search = searchParams.get("search");
+    const filter = searchParams.get("filter");
+    if (search) params.set("search", search);
+    if (filter) params.set("filter", filter);
+    const qs = params.toString();
+    return qs ? `${pathname}?${qs}` : pathname;
+  }, [pathname, searchParams]);
+
   const labelOf = (r: RecruiterOption) => r.full_name || r.email || r.user_id;
 
   return (
-    <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="space-y-2.5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <Select
           label="Status"
           value={searchParams.get("status") ?? ""}
@@ -155,36 +182,42 @@ export function CandidateListFilters({
             </option>
           ))}
         </Select>
-      </div>
-      <div className="grid grid-cols-1 gap-3 border-t border-slate-100 pt-3 sm:grid-cols-[repeat(2,minmax(140px,1fr))_auto] sm:items-end lg:grid-cols-[repeat(2,minmax(140px,1fr))_auto]">
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
+        <label className="block min-w-[140px] flex-1">
+          <span className="mb-0.5 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
             Updated from
           </span>
           <input
             type="date"
-            className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
+            className="h-[38px] w-full rounded-md border border-slate-300 px-2 text-[13px] sm:h-10 sm:text-sm"
             value={searchParams.get("from") ?? ""}
             onChange={(e) => update("from", e.target.value)}
           />
         </label>
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
+        <label className="block min-w-[140px] flex-1">
+          <span className="mb-0.5 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
             Updated to
           </span>
           <input
             type="date"
-            className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
+            className="h-[38px] w-full rounded-md border border-slate-300 px-2 text-[13px] sm:h-10 sm:text-sm"
             value={searchParams.get("to") ?? ""}
             onChange={(e) => update("to", e.target.value)}
           />
         </label>
-        <Link
-          href={pathname}
-          className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-600 hover:bg-slate-50"
-        >
-          Clear filters
-        </Link>
+        <div className="flex items-end">
+          <Link
+            href={clearFiltersHref}
+            aria-disabled={!hasActiveFilters}
+            className={cn(
+              "inline-flex h-[38px] w-full items-center justify-center rounded-md border px-3 text-[13px] font-medium sm:h-10 sm:text-sm",
+              hasActiveFilters
+                ? "border-slate-300 text-slate-700 hover:bg-slate-50"
+                : "pointer-events-none border-slate-200 text-slate-400"
+            )}
+          >
+            Clear filters
+          </Link>
+        </div>
       </div>
     </div>
   );

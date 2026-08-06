@@ -11,6 +11,7 @@ const DEBOUNCE_MS = 350;
 export function JobSearchInput({
   initialQuery = "",
   placeholder = "Search jobs by title or job code",
+  label = "Search job workspaces by title or job code",
   className,
   inputClassName,
   paramName = "q",
@@ -19,6 +20,8 @@ export function JobSearchInput({
 }: {
   initialQuery?: string;
   placeholder?: string;
+  /** Accessible label for the search field. */
+  label?: string;
   className?: string;
   inputClassName?: string;
   paramName?: string;
@@ -75,7 +78,7 @@ export function JobSearchInput({
   return (
     <div className={cn("relative w-full", className)}>
       <label htmlFor={inputId} className="sr-only">
-        Search job workspaces by title or job code
+        {label}
       </label>
       <SearchIcon
         className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
@@ -86,6 +89,22 @@ export function JobSearchInput({
         type="search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            const normalized = normalizeSearchQuery(query);
+            const params = new URLSearchParams(searchParams.toString());
+            if (normalized) params.set(paramName, normalized);
+            else params.delete(paramName);
+            if (resetPageParam) params.delete(resetPageParam);
+            const qs = params.toString();
+            startTransition(() => {
+              router.replace(qs ? `${pathname}?${qs}` : pathname, {
+                scroll: false,
+              });
+            });
+          }
+        }}
         placeholder={placeholder}
         className={cn(
           "h-10 w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-20 text-sm text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20",

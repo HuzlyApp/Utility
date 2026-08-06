@@ -26,6 +26,7 @@ const files = [
   new URL("./duplicate-candidate-schema.sql", import.meta.url),
   new URL("./workspace-search-indexes.sql", import.meta.url),
   new URL("./contact-extract-schema.sql", import.meta.url),
+  new URL("./candidate-search-indexes.sql", import.meta.url),
 ];
 
 // Naive splitter: safe here because the schema has no PL/pgSQL bodies.

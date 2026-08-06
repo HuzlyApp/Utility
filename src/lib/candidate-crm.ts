@@ -98,6 +98,64 @@ export function toJobSearchPattern(query: string | null | undefined): string | n
   return `%${normalized}%`;
 }
 
+/** Same ILIKE pattern builder used for candidate free-text search. */
+export function toCandidateSearchPattern(
+  query: string | null | undefined
+): string | null {
+  return toJobSearchPattern(query);
+}
+
+/**
+ * Digits-only pattern for phone search so "7034097129" matches
+ * "+1 (703) 409-7129". Returns null when fewer than 3 digits are present.
+ */
+export function toPhoneDigitsSearchPattern(
+  query: string | null | undefined
+): string | null {
+  const digits = (query ?? "").replace(/\D/g, "");
+  if (digits.length < 3) return null;
+  return `%${digits}%`;
+}
+
+/** Pure helper for unit tests / client-side empty checks. */
+export function matchesCandidateSearch(
+  row: {
+    full_name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    job_code?: string | null;
+    job_title?: string | null;
+    status_name?: string | null;
+    assigned_recruiter_name?: string | null;
+  },
+  query: string | null | undefined,
+  opts?: { includeContact?: boolean }
+): boolean {
+  const q = normalizeSearchQuery(query).toLowerCase();
+  if (!q) return true;
+  const includeContact = opts?.includeContact ?? true;
+  const textParts = [
+    row.full_name,
+    row.job_code,
+    row.job_title,
+    row.status_name,
+    row.assigned_recruiter_name,
+    ...(includeContact ? [row.email, row.phone] : []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (textParts.includes(q)) return true;
+  if (includeContact) {
+    const needle = q.replace(/\D/g, "");
+    if (needle.length >= 3) {
+      const hay = (row.phone ?? "").replace(/\D/g, "");
+      if (hay.includes(needle)) return true;
+    }
+  }
+  return false;
+}
+
 export function matchesJobSearch(
   workspace: {
     job_title?: string | null;
