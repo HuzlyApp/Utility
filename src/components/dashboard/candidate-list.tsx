@@ -9,6 +9,7 @@ import type { DashboardCandidateRow } from "@/lib/dal/candidates";
 import type { StatusOption } from "@/components/candidate/candidate-status-select";
 import { CandidateStatusSelect } from "@/components/candidate/candidate-status-select";
 import { formatTimestamp } from "@/lib/client/candidate-crm";
+import { displayOrDash } from "@/lib/candidate-crm";
 import { displayCandidateName } from "@/lib/resume-name";
 
 function scoreTone(score: number | null): string {
@@ -22,9 +23,11 @@ function scoreTone(score: number | null): string {
 export function CandidateList({
   items,
   statuses,
+  canViewContact = true,
 }: {
   items: DashboardCandidateRow[];
   statuses: StatusOption[];
+  canViewContact?: boolean;
 }) {
   const router = useRouter();
 
@@ -42,10 +45,17 @@ export function CandidateList({
     <Card>
       <CardBody className="p-0">
         <div className="overflow-x-auto">
-          <table className="min-w-[820px] w-full text-left text-sm">
+          <table className="min-w-[1100px] w-full text-left text-sm">
           <thead className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-3 py-2 font-medium">Candidate</th>
+              <th className="px-3 py-2 font-medium">Job Code</th>
+              {canViewContact ? (
+                <>
+                  <th className="px-3 py-2 font-medium">Phone Number</th>
+                  <th className="px-3 py-2 font-medium">Email Address</th>
+                </>
+              ) : null}
               <th className="px-3 py-2 font-medium">Matched job</th>
               <th className="px-3 py-2 font-medium">Match</th>
               <th className="px-3 py-2 font-medium">Status</th>
@@ -69,7 +79,20 @@ export function CandidateList({
                     {[row.specialty, row.location].filter(Boolean).join(" · ") || "—"}
                   </p>
                 </td>
-                <td className="px-3 py-2 text-slate-600">{row.job_title || "—"}</td>
+                <td className="px-3 py-2 text-slate-600">
+                  {displayOrDash(row.job_code)}
+                </td>
+                {canViewContact ? (
+                  <>
+                    <td className="px-3 py-2 text-slate-600">
+                      {displayOrDash(row.phone)}
+                    </td>
+                    <td className="px-3 py-2 break-all text-slate-600">
+                      {displayOrDash(row.email)}
+                    </td>
+                  </>
+                ) : null}
+                <td className="px-3 py-2 text-slate-600">{displayOrDash(row.job_title)}</td>
                 <td className="px-3 py-2">
                   <p className={`font-semibold ${scoreTone(row.match_score)}`}>
                     {row.match_score != null ? `${row.match_score}%` : "—"}

@@ -37,6 +37,12 @@ import {
 import { CandidateNotesDialog } from "@/components/candidate/candidate-notes-dialog";
 import type { CrmActorRole } from "@/lib/candidate-crm";
 import { displayCandidateName } from "@/lib/resume-name";
+import { CandidateIdentityCell } from "./candidate-identity-cell";
+import {
+  CONTACT_EXTRACTION_POLL_MAX_MS,
+  CONTACT_EXTRACTION_POLL_MS,
+  isContactExtractionInFlight,
+} from "@/lib/contact-extract";
 
 type SortKey = "score" | "name" | "category" | "readiness" | "verification" | "date";
 
@@ -146,6 +152,8 @@ export function RankingTable({
   const inFlightRef = useRef<Set<string>>(new Set());
   const [, setInFlightTick] = useState(0);
   const analyzingSinceRef = useRef<Record<string, number>>({});
+  const contactPollStartedRef = useRef<number | null>(null);
+  const [retryingContactId, setRetryingContactId] = useState<string | null>(null);
   const { optionId, setOptionId, option, requestBody } = useAiModelSelection();
   const [availability, setAvailability] = useState<ProviderAvailability | null>(null);
 
@@ -242,6 +250,56 @@ export function RankingTable({
 
   // Resume polling for ANALYZING rows after navigation/refresh until DB settles.
   const hasAnalyzingRows = rows.some((r) => r.status === "ANALYZING");
+  const hasContactExtractingRows = rows.some((r) =>
+    isContactExtractionInFlight(
+      r.contact_extraction_status,
+      r.contact_extraction_started_at
+    )
+  );
+
+  useEffect(() => {
+    if (!hasContactExtractingRows) {
+      contactPollStartedRef.current = null;
+      return;
+    }
+    if (contactPollStartedRef.current == null) {
+      contactPollStartedRef.current = Date.now();
+    }
+    const pollId = window.setInterval(() => {
+      const started = contactPollStartedRef.current ?? Date.now();
+      if (Date.now() - started > CONTACT_EXTRACTION_POLL_MAX_MS) {
+        window.clearInterval(pollId);
+        contactPollStartedRef.current = null;
+        return;
+      }
+      void refresh();
+    }, CONTACT_EXTRACTION_POLL_MS);
+    return () => window.clearInterval(pollId);
+  }, [hasContactExtractingRows, refresh]);
+
+  async function retryContactExtraction(candidateId: string) {
+    setRetryingContactId(candidateId);
+    try {
+      const res = await fetch(`/api/candidates/${candidateId}/reextract-contact`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: false }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error ?? "Retry failed.");
+      }
+      await refresh();
+      router.refresh();
+    } catch (err) {
+      toast(
+        err instanceof Error ? err.message : "Could not retry contact extraction.",
+        "error"
+      );
+    } finally {
+      setRetryingContactId(null);
+    }
+  }
 
   useEffect(() => {
     const now = Date.now();
@@ -704,11 +762,11 @@ export function RankingTable({
       )}
 
       <div className="hidden lg:block overflow-x-auto">
-        <table className="w-full min-w-[900px] border-collapse text-sm">
+        <table className="w-full min-w-[1100px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
               <th className="px-2 py-2">#</th>
-              <th className="px-2 py-2">Candidate</th>
+              <th className="px-2 py-2 min-w-[16rem]">Candidate</th>
               <th className="px-2 py-2">Score</th>
               <th className="px-2 py-2">Model</th>
               <th className="px-2 py-2">Category</th>
@@ -750,25 +808,29 @@ export function RankingTable({
                       {i + 1}
                     </div>
                   </td>
-                  <td className="px-2 py-2 font-medium text-slate-800">
-                    <div className="min-w-0">
-                      <Link
-                        href={`/candidates/${r.candidate_id}?w=${workspaceId}`}
-                        className="break-words hover:text-brand-700"
-                      >
-                        {displayCandidateName(r.full_name)}
-                      </Link>
-                      {r.disposition && (
-                        <span className="ml-2 text-[10px] uppercase text-slate-400">
-                          {r.disposition.replace(/_/g, " ")}
-                        </span>
-                      )}
-                      {rowProgress && rowProgress.stage !== "completed" && (
-                        <p className="mt-0.5 break-words text-[11px] font-normal text-blue-700">
-                          {rowProgress.label}
-                        </p>
-                      )}
-                    </div>
+                  <td className="px-2 py-2 align-top text-slate-800">
+                    <CandidateIdentityCell
+                      name={r.candidate_name ?? r.full_name}
+                      href={`/candidates/${r.candidate_id}?w=${workspaceId}`}
+                      jobCode={r.job_code}
+                      phone={r.phone_number}
+                      email={r.email}
+                      canViewContact={r.can_view_contact}
+                      contactExtractionStatus={r.contact_extraction_status}
+                      contactExtractionStartedAt={r.contact_extraction_started_at}
+                      contactExtractionAttempts={r.contact_extraction_attempts}
+                      canRetryExtraction={r.can_view_contact}
+                      retrying={retryingContactId === r.candidate_id}
+                      onRetryExtraction={() => {
+                        void retryContactExtraction(r.candidate_id);
+                      }}
+                      disposition={r.disposition}
+                      progressLabel={
+                        rowProgress && rowProgress.stage !== "completed"
+                          ? rowProgress.label
+                          : null
+                      }
+                    />
                   </td>
                   <td className="px-2 py-2">
                     {r.match_score != null ? (
@@ -810,6 +872,7 @@ export function RankingTable({
                   <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
                     <CandidateStatusSelect
                       candidateId={r.candidate_id}
+                      candidateName={r.candidate_name ?? r.full_name}
                       statuses={statuses}
                       value={r.current_status_id}
                       statusName={r.status_name}
@@ -817,6 +880,7 @@ export function RankingTable({
                       updatedByName={r.last_status_changed_by_name}
                       updatedAt={r.last_status_changed_at}
                       showAttribution={Boolean(r.last_status_changed_by_name)}
+                      showHistoryAction
                       onChanged={() => {
                         void refresh();
                         router.refresh();
@@ -897,6 +961,7 @@ export function RankingTable({
               progress={rowProgress}
               busy={rowBusy}
               batchRunning={batchRunning}
+              retryingContact={retryingContactId === r.candidate_id}
               onToggleSelect={toggleSelect}
               onAnalyze={(id) => void analyzeSingle(id)}
               onOpenNotes={(id, name) =>
@@ -905,6 +970,9 @@ export function RankingTable({
               onStatusChanged={() => {
                 void refresh();
                 router.refresh();
+              }}
+              onRetryContactExtraction={(id) => {
+                void retryContactExtraction(id);
               }}
             />
           );

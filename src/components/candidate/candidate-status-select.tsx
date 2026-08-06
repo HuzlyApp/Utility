@@ -1,9 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/cn";
 import { useToast } from "@/components/ui/toast";
-import { patchCandidateStatus, formatTimestamp } from "@/lib/client/candidate-crm";
+import { formatTimestamp } from "@/lib/client/candidate-crm";
+import {
+  CandidateStatusModal,
+  type StatusModalTab,
+} from "@/components/candidate/candidate-status-modal";
+import { ClockIcon } from "@/components/ui/icons";
 
 export interface StatusOption {
   id: string;
@@ -14,6 +19,7 @@ export interface StatusOption {
 
 export function CandidateStatusSelect({
   candidateId,
+  candidateName,
   statuses,
   value,
   statusName,
@@ -21,11 +27,13 @@ export function CandidateStatusSelect({
   updatedByName,
   updatedAt,
   showAttribution = true,
+  showHistoryAction = true,
   fullWidth = false,
   className,
   onChanged,
 }: {
   candidateId: string;
+  candidateName?: string | null;
   statuses: StatusOption[];
   value: string | null;
   statusName?: string | null;
@@ -33,7 +41,8 @@ export function CandidateStatusSelect({
   updatedByName?: string | null;
   updatedAt?: string | null;
   showAttribution?: boolean;
-  /** Stretch the select to fill its container (used in mobile cards). */
+  /** Show View History control next to the status button. */
+  showHistoryAction?: boolean;
   fullWidth?: boolean;
   className?: string;
   onChanged?: (next: {
@@ -44,78 +53,64 @@ export function CandidateStatusSelect({
   }) => void;
 }) {
   const [statusId, setStatusId] = useState(value);
-  const [saving, setSaving] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalTab, setModalTab] = useState<StatusModalTab>("update");
   const [localName, setLocalName] = useState(statusName ?? null);
   const [localColor, setLocalColor] = useState(statusColor ?? null);
   const [localBy, setLocalBy] = useState(updatedByName ?? null);
   const [localAt, setLocalAt] = useState(updatedAt ?? null);
   const { toast } = useToast();
 
-  async function onChange(nextId: string) {
-    if (!nextId || nextId === statusId) return;
-    const previous = statusId;
-    setStatusId(nextId);
-    setSaving(true);
-    try {
-      const result = await patchCandidateStatus(candidateId, nextId);
-      const opt = statuses.find((s) => s.id === nextId);
-      setLocalName(result.newStatusName ?? opt?.name ?? null);
-      setLocalColor(opt?.color ?? null);
-      if (result.changed) {
-        setLocalBy(result.changedByName);
-        setLocalAt(result.changedAt);
-        toast("Status updated.", "success");
-        onChanged?.({
-          statusId: nextId,
-          statusName: result.newStatusName,
-          changedAt: result.changedAt,
-          changedByName: result.changedByName,
-        });
-      }
-    } catch (err) {
-      setStatusId(previous);
-      toast(err instanceof Error ? err.message : "Could not update status.", "error");
-    } finally {
-      setSaving(false);
-    }
-  }
+  useEffect(() => {
+    if (modalOpen) return;
+    setStatusId(value);
+    setLocalName(statusName ?? null);
+    setLocalColor(statusColor ?? null);
+    setLocalBy(updatedByName ?? null);
+    setLocalAt(updatedAt ?? null);
+  }, [value, statusName, statusColor, updatedByName, updatedAt, modalOpen]);
 
-  const activeStatuses = statuses.filter((s) => s.is_active !== false);
+  function openModal(tab: StatusModalTab) {
+    setModalTab(tab);
+    setModalOpen(true);
+  }
 
   return (
     <div className={cn("space-y-1", className)}>
-      <div className="flex items-center gap-2">
+      <div className={cn("flex items-center gap-1.5", fullWidth && "w-full")}>
         <span
           className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
           style={{ backgroundColor: localColor || "#94a3b8" }}
           aria-hidden
         />
-        <select
+        <button
+          type="button"
           className={cn(
-            "max-w-full rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-800 disabled:opacity-60",
-            fullWidth ? "h-9 w-full flex-1 min-w-0" : "h-8"
+            "max-w-full rounded-md border border-slate-300 bg-white px-2 text-left text-sm text-slate-800 hover:bg-slate-50",
+            fullWidth ? "h-9 min-w-0 flex-1" : "h-8 min-w-[9rem]"
           )}
-          value={statusId ?? ""}
-          disabled={saving}
-          onClick={(e) => e.stopPropagation()}
-          onChange={(e) => {
+          onClick={(e) => {
             e.stopPropagation();
-            void onChange(e.target.value);
+            openModal("update");
           }}
-          aria-label="Candidate status"
+          aria-label="Update candidate status"
         >
-          {!statusId && <option value="">Select status</option>}
-          {activeStatuses.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-          {statusId &&
-            !activeStatuses.some((s) => s.id === statusId) &&
-            localName && (
-              <option value={statusId}>{localName} (inactive)</option>
-            )}
-        </select>
+          {localName || "Select status"}
+        </button>
+        {showHistoryAction ? (
+          <button
+            type="button"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+            title="View status history"
+            aria-label="View status history"
+            onClick={(e) => {
+              e.stopPropagation();
+              openModal("history");
+            }}
+          >
+            <ClockIcon className="h-4 w-4" />
+          </button>
+        ) : null}
       </div>
       {showAttribution && (localBy || localAt) && (
         <p className="break-words text-[11px] text-slate-500">
@@ -123,6 +118,28 @@ export function CandidateStatusSelect({
           {localAt ? ` · ${formatTimestamp(localAt)}` : ""}
         </p>
       )}
+
+      <CandidateStatusModal
+        isOpen={modalOpen}
+        candidateId={candidateId}
+        candidateName={candidateName}
+        statuses={statuses}
+        currentStatusId={statusId}
+        currentStatusName={localName}
+        currentStatusColor={localColor}
+        initialTab={modalTab}
+        onCancel={() => setModalOpen(false)}
+        onSuccess={(result) => {
+          const opt = statuses.find((s) => s.id === result.statusId);
+          setStatusId(result.statusId);
+          setLocalName(result.statusName ?? opt?.name ?? null);
+          setLocalColor(opt?.color ?? null);
+          setLocalBy(result.changedByName);
+          setLocalAt(result.changedAt);
+          toast("Status updated.", "success");
+          onChanged?.(result);
+        }}
+      />
     </div>
   );
 }

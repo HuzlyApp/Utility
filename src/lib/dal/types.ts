@@ -75,6 +75,16 @@ export interface Candidate {
   full_name: string | null;
   email: string | null;
   phone: string | null;
+  email_normalized?: string | null;
+  phone_normalized?: string | null;
+  email_source?: string | null;
+  phone_source?: string | null;
+  contact_extraction_status?: string | null;
+  contact_extracted_at?: string | null;
+  contact_extraction_started_at?: string | null;
+  contact_extraction_completed_at?: string | null;
+  contact_extraction_error?: string | null;
+  contact_extraction_attempts?: number | null;
   specialty: string | null;
   location: string | null;
   extracted_resume_text: string | null;
@@ -132,6 +142,18 @@ export interface RankedCandidateRow {
   job_match_candidate_id: string;
   candidate_id: string;
   full_name: string | null;
+  /** Display alias for full_name (API contract). */
+  candidate_name: string | null;
+  job_code: string | null;
+  phone_number: string | null;
+  email: string | null;
+  /** False when the viewer cannot see phone/email (values are redacted server-side). */
+  can_view_contact: boolean;
+  contact_extraction_status: string | null;
+  contact_extraction_started_at?: string | null;
+  contact_extraction_completed_at?: string | null;
+  contact_extraction_error?: string | null;
+  contact_extraction_attempts?: number | null;
   status: CandidatePipelineStatus;
   latest_analysis_id: string | null;
   match_score: number | null;

@@ -58,7 +58,7 @@ export function RecruiterDecisionPanel({
         }
       }
       setSaved(selected);
-      toast("Recruiter decision saved.", "success");
+      toast("Final decision saved.", "success");
     } catch {
       toast("Could not save the decision.", "error");
     } finally {
@@ -69,7 +69,7 @@ export function RecruiterDecisionPanel({
   return (
     <Card>
       <CardHeader
-        title="Recruiter Decision"
+        title="Final Decision"
         description="You control the final outcome. The AI recommendation is guidance only."
       />
       <CardBody className="space-y-4">

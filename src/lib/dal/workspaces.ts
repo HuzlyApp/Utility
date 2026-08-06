@@ -6,6 +6,7 @@ import type { AppUser } from "@/lib/auth/session";
 import type { StructuredJobFields } from "@/lib/types";
 import type { JobStatus, Workspace, WorkspaceSummary } from "./types";
 import { AuthError } from "@/lib/auth/session";
+import { toJobSearchPattern } from "@/lib/candidate-crm";
 
 export interface WorkspaceInput {
   job_ref?: string;
@@ -83,12 +84,64 @@ export async function getWorkspace(
   return rows[0] ?? null;
 }
 
+export interface ListWorkspacesOptions {
+  includeArchived?: boolean;
+  search?: string;
+  /** 1-based page; when set with pageSize, results are paginated. */
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ListWorkspacesResult {
+  items: WorkspaceSummary[];
+  total: number;
+  page: number;
+  pageSize: number | null;
+}
+
 export async function listWorkspaces(
   user: AppUser,
-  opts?: { includeArchived?: boolean }
+  opts?: ListWorkspacesOptions
 ): Promise<WorkspaceSummary[]> {
+  const result = await listWorkspacesPage(user, opts);
+  return result.items;
+}
+
+export async function listWorkspacesPage(
+  user: AppUser,
+  opts?: ListWorkspacesOptions
+): Promise<ListWorkspacesResult> {
   const sql = getSql();
   const tenantId = tenantIdOf(user);
+  const searchPattern = toJobSearchPattern(opts?.search);
+  const includeArchived = opts?.includeArchived ?? false;
+  const pageSize =
+    opts?.pageSize != null && opts.pageSize > 0
+      ? Math.min(Math.floor(opts.pageSize), 100)
+      : null;
+  const page =
+    pageSize != null
+      ? Math.max(1, Math.floor(opts?.page ?? 1))
+      : 1;
+  const offset = pageSize != null ? (page - 1) * pageSize : 0;
+
+  const countRows = (await sql`
+    SELECT COUNT(*)::int AS total
+    FROM job_match_workspaces w
+    WHERE w.tenant_id = ${tenantId}
+      AND (${includeArchived} OR w.workspace_status = 'ACTIVE')
+      AND (
+        ${searchPattern}::text IS NULL
+        OR w.job_title ILIKE ${searchPattern}
+        OR w.job_ref ILIKE ${searchPattern}
+        OR w.department ILIKE ${searchPattern}
+        OR w.msp_or_client ILIKE ${searchPattern}
+        OR w.location ILIKE ${searchPattern}
+        OR w.specialty ILIKE ${searchPattern}
+      )
+  `) as Array<{ total: number }>;
+  const total = Number(countRows[0]?.total ?? 0);
+
   const rows = (await sql`
     SELECT w.*,
       COUNT(jmc.id) AS candidate_count,
@@ -99,18 +152,31 @@ export async function listWorkspaces(
     LEFT JOIN job_match_candidates jmc ON jmc.workspace_id = w.id
     LEFT JOIN candidate_match_analyses a ON a.id = jmc.latest_analysis_id
     WHERE w.tenant_id = ${tenantId}
-      AND (${opts?.includeArchived ?? false} OR w.workspace_status = 'ACTIVE')
+      AND (${includeArchived} OR w.workspace_status = 'ACTIVE')
+      AND (
+        ${searchPattern}::text IS NULL
+        OR w.job_title ILIKE ${searchPattern}
+        OR w.job_ref ILIKE ${searchPattern}
+        OR w.department ILIKE ${searchPattern}
+        OR w.msp_or_client ILIKE ${searchPattern}
+        OR w.location ILIKE ${searchPattern}
+        OR w.specialty ILIKE ${searchPattern}
+      )
     GROUP BY w.id
     ORDER BY w.updated_at DESC
+    LIMIT ${pageSize ?? 2147483647}
+    OFFSET ${offset}
   `) as Array<Workspace & Record<string, unknown>>;
 
-  return rows.map((r) => ({
+  const items = rows.map((r) => ({
     ...(r as Workspace),
     candidate_count: n(r.candidate_count),
     analyzed_count: n(r.analyzed_count),
     strong_matches: n(r.strong_matches),
     ready_to_submit: n(r.ready_to_submit),
   }));
+
+  return { items, total, page, pageSize };
 }
 
 export async function updateWorkspace(

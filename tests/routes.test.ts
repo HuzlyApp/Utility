@@ -25,6 +25,13 @@ describe("jobRoutes", () => {
     expect(jobRoutes.list("archived")).toBe("/jobs?status=archived");
     expect(jobRoutes.list("all")).toBe("/jobs");
   });
+
+  it("preserves search query when switching status tabs", () => {
+    expect(jobRoutes.list({ status: "active", q: "icu" })).toBe(
+      "/jobs?status=active&q=icu"
+    );
+    expect(jobRoutes.list({ status: "all", q: "JOB-1" })).toBe("/jobs?q=JOB-1");
+  });
 });
 
 describe("dashboardStatRoutes", () => {

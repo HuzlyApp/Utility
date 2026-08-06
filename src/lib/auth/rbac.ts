@@ -12,6 +12,11 @@ export function canAccessTenantWorkspace(role: AppRole): boolean {
   return role !== "SUPER_ADMIN";
 }
 
+/** Phone/email on candidate listings — VIEWER cannot see contact PII. */
+export function canViewCandidateContact(role: AppRole): boolean {
+  return role !== "VIEWER";
+}
+
 export function resolvePostLoginPath(role: AppRole): string {
   return role === "SUPER_ADMIN" ? "/superadmin" : "/dashboard";
 }

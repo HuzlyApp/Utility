@@ -20,6 +20,111 @@ export function canEditNote(params: {
 
 export type CrmActorRole = "SUPER_ADMIN" | "TENANT_ADMIN" | "RECRUITER" | "VIEWER";
 
+/** Consistent empty-value placeholder for listing tables. */
+export function displayOrDash(value: string | null | undefined): string {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : "—";
+}
+
+/** Normalize a free-text search query (trim + collapse internal whitespace). */
+export function normalizeSearchQuery(query: string | null | undefined): string {
+  return (query ?? "").trim().replace(/\s+/g, " ");
+}
+
+export function buildStatusChangeMetadata(params: {
+  previousStatusId: string | null | undefined;
+  newStatusId: string;
+  note?: string | null;
+}): Record<string, unknown> {
+  const note = params.note?.trim() || null;
+  return {
+    previous_status_id: params.previousStatusId ?? null,
+    new_status_id: params.newStatusId,
+    ...(note ? { note } : {}),
+  };
+}
+
+export function extractStatusChangeNote(
+  metadata: Record<string, unknown> | null | undefined
+): string | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const note = metadata.note;
+  if (typeof note !== "string") return null;
+  const trimmed = note.trim();
+  return trimmed || null;
+}
+
+export interface StatusHistoryEntry {
+  id: string;
+  previousStatus: string | null;
+  newStatus: string | null;
+  note: string | null;
+  updatedBy: string | null;
+  changedAt: string;
+}
+
+/** Filter and map activity rows into status history (newest-first preserved). */
+export function toStatusHistory(
+  activity: Array<{
+    id: string;
+    action_type: string;
+    previous_value: string | null;
+    new_value: string | null;
+    performer_name: string | null;
+    metadata: Record<string, unknown>;
+    created_at: string;
+  }>
+): StatusHistoryEntry[] {
+  return activity
+    .filter((item) => item.action_type === "STATUS_CHANGED")
+    .map((item) => ({
+      id: item.id,
+      previousStatus: item.previous_value,
+      newStatus: item.new_value,
+      note: extractStatusChangeNote(item.metadata),
+      updatedBy: item.performer_name,
+      changedAt: item.created_at,
+    }));
+}
+
+/** Strip LIKE/ILIKE wildcards from user search input (partial match is applied by us). */
+export function sanitizeJobSearchTerm(value: string): string {
+  return value.replace(/[%_\\]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+export function toJobSearchPattern(query: string | null | undefined): string | null {
+  const normalized = sanitizeJobSearchTerm(normalizeSearchQuery(query));
+  if (!normalized) return null;
+  return `%${normalized}%`;
+}
+
+export function matchesJobSearch(
+  workspace: {
+    job_title?: string | null;
+    job_ref?: string | null;
+    department?: string | null;
+    msp_or_client?: string | null;
+    location?: string | null;
+    specialty?: string | null;
+  },
+  query: string | null | undefined
+): boolean {
+  const q = normalizeSearchQuery(query).toLowerCase();
+  if (!q) return true;
+  const haystack = [
+    workspace.job_title,
+    workspace.job_ref,
+    workspace.department,
+    workspace.msp_or_client,
+    workspace.location,
+    workspace.specialty,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(q);
+}
+
 export function formatActivitySummary(params: {
   actionType: string;
   previousValue?: string | null;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   canAccessTenantWorkspace,
   canManageTenant,
+  canViewCandidateContact,
   isSuperAdmin,
   resolvePostLoginPath,
 } from "@/lib/auth/rbac";
@@ -27,5 +28,10 @@ describe("rbac helpers", () => {
   it("post-login route is role aware", () => {
     expect(resolvePostLoginPath("SUPER_ADMIN")).toBe("/superadmin");
     expect(resolvePostLoginPath("TENANT_ADMIN")).toBe("/dashboard");
+  });
+
+  it("restricts candidate contact details for viewers", () => {
+    expect(canViewCandidateContact("VIEWER")).toBe(false);
+    expect(canViewCandidateContact("RECRUITER")).toBe(true);
   });
 });

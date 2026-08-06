@@ -167,6 +167,7 @@ export function CandidateDetail({
   const [resumeText, setResumeText] = useState(candidate.extracted_resume_text ?? "");
   const [verified, setVerified] = useState<VerifiedRecruiterInputs>(candidate.verified_information ?? {});
   const [savingCandidate, setSavingCandidate] = useState(false);
+  const [reextracting, setReextracting] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
   const [analysisStage, setAnalysisStage] = useState<{
     stage: AnalysisProgressStage;
@@ -260,6 +261,40 @@ export function CandidateDetail({
       toast("Could not save changes.", "error");
     } finally {
       setSavingCandidate(false);
+    }
+  }
+
+  async function reextractContact() {
+    setReextracting(true);
+    try {
+      const res = await fetch(`/api/candidates/${candidate.id}/reextract-contact`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: false }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error ?? "Re-extraction failed.");
+      }
+      if (data.email) setEmail(data.email);
+      if (data.phone) setPhone(data.phone);
+      toast(
+        data.status === "not_found"
+          ? "No contact details found in the résumé."
+          : data.status === "failed"
+            ? "Contact extraction failed."
+            : "Contact details re-extracted from résumé.",
+        data.status === "not_found" || data.status === "failed" ? "info" : "success"
+      );
+      if (workspaceId) notifyWorkspaceCandidatesChanged(workspaceId);
+      router.refresh();
+    } catch (err) {
+      toast(
+        err instanceof Error ? err.message : "Could not re-extract contact details.",
+        "error"
+      );
+    } finally {
+      setReextracting(false);
     }
   }
 
@@ -553,7 +588,7 @@ export function CandidateDetail({
         }),
       });
       if (!res.ok) throw new Error();
-      toast("Recruiter decision recorded.", "success");
+      toast("Final decision recorded.", "success");
       router.refresh();
     } catch {
       toast("Could not record decision.", "error");
@@ -643,12 +678,14 @@ export function CandidateDetail({
               <div className="mt-3 space-y-2">
                 <CandidateStatusSelect
                   candidateId={candidate.id}
+                  candidateName={candidate.full_name}
                   statuses={statuses}
                   value={candidate.current_status_id}
                   statusName={candidate.status_name}
                   statusColor={candidate.status_color}
                   updatedByName={candidate.last_status_changed_by_name}
                   updatedAt={candidate.last_status_changed_at}
+                  showHistoryAction
                   onChanged={() => router.refresh()}
                 />
                 <p className="text-[11px] text-slate-500">
@@ -828,24 +865,36 @@ export function CandidateDetail({
                 <TextInput value={location} onChange={(e) => setLocation(e.target.value)} />
               </Field>
             </div>
-            <Button
-              size="sm"
-              disabled={savingCandidate}
-              onClick={() =>
-                saveCandidate(
-                  {
-                    full_name: name,
-                    email,
-                    phone,
-                    specialty,
-                    location,
-                  },
-                  "Candidate saved"
-                )
-              }
-            >
-              {savingCandidate ? "Saving candidate…" : "Save details"}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                disabled={savingCandidate}
+                onClick={() =>
+                  saveCandidate(
+                    {
+                      full_name: name,
+                      email,
+                      phone,
+                      specialty,
+                      location,
+                    },
+                    "Candidate saved"
+                  )
+                }
+              >
+                {savingCandidate ? "Saving candidate…" : "Save details"}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={savingCandidate || reextracting}
+                onClick={() => {
+                  void reextractContact();
+                }}
+              >
+                {reextracting ? "Re-extracting…" : "Re-extract contact details"}
+              </Button>
+            </div>
           </CardBody>
         </Card>
 
@@ -1086,7 +1135,7 @@ function DispositionPanel({
   return (
     <Card>
       <CardHeader
-        title="Recruiter decision"
+        title="Final decision"
         description="Kept separate from the AI recommendation."
       />
       <CardBody className="space-y-2">

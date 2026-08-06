@@ -5,8 +5,20 @@ import { logCandidateActivity } from "./activity";
 import { getDefaultStatusId, getStatusById } from "./statuses";
 import { AuthError, type AppUser } from "@/lib/auth/session";
 import type { VerifiedRecruiterInputs } from "@/lib/types";
-import { normalizeCandidateName } from "@/lib/duplicate-candidate/normalize";
-import { mapStatusNameToActivityType } from "@/lib/recruiter-activity";
+import { normalizeCandidateName, normalizeEmail, normalizePhone } from "@/lib/duplicate-candidate/normalize";
+import { mapStatusNameToActivityType, sourceFromRole } from "@/lib/recruiter-activity";
+import { buildStatusChangeMetadata } from "@/lib/candidate-crm";
+import { canViewCandidateContact } from "@/lib/auth/rbac";
+import {
+  canOverwriteContactWithResume,
+  extractContactsFromResumeText,
+  getSafeContactExtractionError,
+  hasContactDetails,
+  CONTACT_EXTRACTION_MAX_ATTEMPTS,
+  CONTACT_EXTRACTION_STALE_MS,
+  type ContactExtractionStatus,
+  type ContactSource,
+} from "@/lib/contact-extract";
 import type {
   Candidate,
   CandidatePipelineStatus,
@@ -17,6 +29,8 @@ export interface CandidateInput {
   full_name?: string;
   email?: string;
   phone?: string;
+  /** When true, mark email/phone changes as MANUAL / MANUAL_CORRECTED. */
+  contactManualEdit?: boolean;
   specialty?: string;
   location?: string;
   extracted_resume_text?: string;
@@ -48,14 +62,16 @@ export async function createCandidate(
       owner_user_id, tenant_id, full_name, normalized_full_name, email, phone, specialty, location,
       extracted_resume_text, ocr_confidence, extraction_quality, recruiter_notes,
       verified_information, created_by, created_by_user_id, updated_by_user_id,
-      current_status_id, assigned_recruiter_id
+      current_status_id, assigned_recruiter_id,
+      contact_extraction_status, contact_extraction_attempts
     ) VALUES (
       ${user.id}, ${tenantId}, ${input.full_name ?? null}, ${normalizedName}, ${input.email ?? null},
       ${input.phone ?? null}, ${input.specialty ?? null}, ${input.location ?? null},
       ${input.extracted_resume_text ?? null}, ${input.ocr_confidence ?? null},
       ${input.extraction_quality ?? null}, ${input.recruiter_notes ?? null},
       ${JSON.stringify(input.verified_information ?? {})}, ${user.id}, ${user.id}, ${user.id},
-      ${defaultStatusId}, ${user.id}
+      ${defaultStatusId}, ${user.id},
+      ${"pending"}, ${0}
     ) RETURNING id
   `) as { id: string }[];
   const id = rows[0].id;
@@ -108,12 +124,41 @@ export async function updateCandidate(
   const tenantId = tenantIdOf(user);
   const nextName = input.full_name ?? existing.full_name;
   const normalizedName = nextName ? normalizeCandidateName(nextName) || null : null;
+
+  const nextEmail = input.email !== undefined ? input.email : existing.email;
+  const nextPhone = input.phone !== undefined ? input.phone : existing.phone;
+  const emailChanged =
+    input.email !== undefined &&
+    (input.email ?? "").trim() !== (existing.email ?? "").trim();
+  const phoneChanged =
+    input.phone !== undefined &&
+    (input.phone ?? "").trim() !== (existing.phone ?? "").trim();
+
+  let emailSource = existing.email_source ?? null;
+  let phoneSource = existing.phone_source ?? null;
+  if (input.contactManualEdit) {
+    if (emailChanged) {
+      emailSource = existing.email_source === "RESUME" || existing.email
+        ? "MANUAL_CORRECTED"
+        : "MANUAL";
+    }
+    if (phoneChanged) {
+      phoneSource = existing.phone_source === "RESUME" || existing.phone
+        ? "MANUAL_CORRECTED"
+        : "MANUAL";
+    }
+  }
+
   await sql`
     UPDATE candidates SET
       full_name = ${nextName},
       normalized_full_name = ${normalizedName},
-      email = ${input.email ?? existing.email},
-      phone = ${input.phone ?? existing.phone},
+      email = ${nextEmail},
+      phone = ${nextPhone},
+      email_normalized = ${normalizeEmail(nextEmail)},
+      phone_normalized = ${normalizePhone(nextPhone)},
+      email_source = ${emailSource},
+      phone_source = ${phoneSource},
       specialty = ${input.specialty ?? existing.specialty},
       location = ${input.location ?? existing.location},
       extracted_resume_text = ${input.extracted_resume_text ?? existing.extracted_resume_text},
@@ -135,6 +180,275 @@ export async function updateCandidate(
     action: "CANDIDATE_UPDATED",
   });
   return true;
+}
+
+/**
+ * Parse résumé text and persist phone/email unless manually corrected.
+ * Always ends in a terminal status (completed | not_found | failed).
+ */
+export async function applyResumeContactExtraction(
+  user: AppUser,
+  candidateId: string,
+  resumeText: string | null | undefined,
+  opts?: {
+    force?: boolean;
+    workspaceId?: string | null;
+    fileType?: string | null;
+  }
+): Promise<{
+  status: ContactExtractionStatus;
+  email: string | null;
+  phone: string | null;
+  attempts: number;
+  error: string | null;
+}> {
+  const existing = await getCandidate(user, candidateId);
+  if (!existing) {
+    throw new AuthError("Candidate not found.", 404);
+  }
+  const sql = getSql();
+  const tenantId = tenantIdOf(user);
+  const force = opts?.force ?? false;
+  const priorAttempts = Number(existing.contact_extraction_attempts ?? 0);
+  const attempts = priorAttempts + 1;
+
+  if (!force && attempts > CONTACT_EXTRACTION_MAX_ATTEMPTS) {
+    const error = "Maximum contact extraction attempts reached.";
+    await sql`
+      UPDATE candidates SET
+        contact_extraction_status = ${"failed"},
+        contact_extraction_error = ${error},
+        contact_extraction_completed_at = now(),
+        contact_extracted_at = now(),
+        updated_at = now()
+      WHERE id = ${candidateId} AND tenant_id = ${tenantId}
+    `;
+    return {
+      status: "failed",
+      email: existing.email,
+      phone: existing.phone,
+      attempts: priorAttempts,
+      error,
+    };
+  }
+
+  console.info("[contact-extract] start", {
+    candidateId,
+    workspaceId: opts?.workspaceId ?? null,
+    attempt: attempts,
+    fileType: opts?.fileType ?? null,
+  });
+
+  await sql`
+    UPDATE candidates SET
+      contact_extraction_status = ${"processing"},
+      contact_extraction_started_at = now(),
+      contact_extraction_error = ${null},
+      contact_extraction_attempts = ${attempts},
+      updated_at = now()
+    WHERE id = ${candidateId} AND tenant_id = ${tenantId}
+  `;
+
+  try {
+    const extracted = extractContactsFromResumeText(resumeText);
+    const allowEmail = canOverwriteContactWithResume(
+      existing.email_source as ContactSource | null,
+      force
+    );
+    const allowPhone = canOverwriteContactWithResume(
+      existing.phone_source as ContactSource | null,
+      force
+    );
+
+    const nextEmail = allowEmail
+      ? extracted.email ?? (force ? null : existing.email)
+      : existing.email;
+    const nextPhone = allowPhone
+      ? extracted.phone ?? (force ? null : existing.phone)
+      : existing.phone;
+    const nextEmailSource = allowEmail
+      ? extracted.email
+        ? "RESUME"
+        : existing.email_source ?? null
+      : existing.email_source ?? null;
+    const nextPhoneSource = allowPhone
+      ? extracted.phone
+        ? "RESUME"
+        : existing.phone_source ?? null
+      : existing.phone_source ?? null;
+
+    const status: ContactExtractionStatus = hasContactDetails({
+      email: nextEmail,
+      phone: nextPhone,
+    })
+      ? "completed"
+      : "not_found";
+
+    await sql`
+      UPDATE candidates SET
+        email = ${nextEmail},
+        phone = ${nextPhone},
+        email_normalized = ${normalizeEmail(nextEmail)},
+        phone_normalized = ${normalizePhone(nextPhone)},
+        email_source = ${nextEmailSource},
+        phone_source = ${nextPhoneSource},
+        contact_extraction_status = ${status},
+        contact_extraction_error = ${null},
+        contact_extraction_completed_at = now(),
+        contact_extracted_at = now(),
+        updated_by_user_id = ${user.id},
+        updated_at = now()
+      WHERE id = ${candidateId} AND tenant_id = ${tenantId}
+    `;
+
+    console.info("[contact-extract] done", {
+      candidateId,
+      workspaceId: opts?.workspaceId ?? null,
+      attempt: attempts,
+      status,
+      hasEmail: Boolean(nextEmail),
+      hasPhone: Boolean(nextPhone),
+    });
+
+    return {
+      status,
+      email: nextEmail,
+      phone: nextPhone,
+      attempts,
+      error: null,
+    };
+  } catch (error) {
+    const safeError = getSafeContactExtractionError(error);
+    await sql`
+      UPDATE candidates SET
+        contact_extraction_status = ${"failed"},
+        contact_extraction_error = ${safeError},
+        contact_extraction_completed_at = now(),
+        contact_extracted_at = now(),
+        updated_at = now()
+      WHERE id = ${candidateId} AND tenant_id = ${tenantId}
+    `;
+    console.info("[contact-extract] failed", {
+      candidateId,
+      workspaceId: opts?.workspaceId ?? null,
+      attempt: attempts,
+      category: "extraction_error",
+    });
+    return {
+      status: "failed",
+      email: existing.email,
+      phone: existing.phone,
+      attempts,
+      error: safeError,
+    };
+  }
+}
+
+/** Mark stale pending/processing rows as failed so UI never sticks on Extracting… */
+export async function finalizeStaleContactExtractions(
+  user: AppUser,
+  candidateIds?: string[]
+): Promise<number> {
+  const sql = getSql();
+  const tenantId = tenantIdOf(user);
+  const cutoff = new Date(Date.now() - CONTACT_EXTRACTION_STALE_MS).toISOString();
+  const ids = candidateIds?.filter(Boolean) ?? [];
+  const rows = (await sql`
+    UPDATE candidates SET
+      contact_extraction_status = ${"failed"},
+      contact_extraction_error = ${"Contact extraction timed out before completion."},
+      contact_extraction_completed_at = now(),
+      contact_extracted_at = COALESCE(contact_extracted_at, now()),
+      updated_at = now()
+    WHERE tenant_id = ${tenantId}
+      AND lower(COALESCE(contact_extraction_status, 'pending')) IN (
+        'pending', 'processing', 'not_processed'
+      )
+      AND contact_extraction_started_at IS NOT NULL
+      AND contact_extraction_started_at < ${cutoff}::timestamptz
+      AND (
+        ${ids.length === 0}::boolean
+        OR id = ANY(${ids}::uuid[])
+      )
+    RETURNING id
+  `) as Array<{ id: string }>;
+  if (rows.length > 0) {
+    console.info("[contact-extract] stale_finalized", {
+      count: rows.length,
+      candidateIds: rows.map((r) => r.id),
+    });
+  }
+  return rows.length;
+}
+
+/**
+ * Resolve legacy/stuck pending rows for a workspace list:
+ * - already has contact → completed
+ * - has résumé text → extract now (capped)
+ * - otherwise → not_found
+ */
+export async function resolvePendingContactExtractions(
+  user: AppUser,
+  candidateIds: string[],
+  opts?: { limit?: number; workspaceId?: string | null }
+): Promise<void> {
+  if (candidateIds.length === 0) return;
+  await finalizeStaleContactExtractions(user, candidateIds);
+
+  const sql = getSql();
+  const tenantId = tenantIdOf(user);
+  const limit = Math.max(1, Math.min(opts?.limit ?? 8, 20));
+  const pending = (await sql`
+    SELECT id, email, phone, extracted_resume_text, email_source, phone_source,
+           contact_extraction_status, contact_extraction_attempts
+    FROM candidates
+    WHERE tenant_id = ${tenantId}
+      AND id = ANY(${candidateIds}::uuid[])
+      AND lower(COALESCE(contact_extraction_status, 'pending')) IN (
+        'pending', 'not_processed'
+      )
+    LIMIT ${limit}
+  `) as Array<{
+    id: string;
+    email: string | null;
+    phone: string | null;
+    extracted_resume_text: string | null;
+    email_source: string | null;
+    phone_source: string | null;
+    contact_extraction_status: string | null;
+    contact_extraction_attempts: number | null;
+  }>;
+
+  for (const row of pending) {
+    if (hasContactDetails(row)) {
+      await sql`
+        UPDATE candidates SET
+          contact_extraction_status = ${"completed"},
+          contact_extraction_completed_at = COALESCE(contact_extraction_completed_at, now()),
+          contact_extracted_at = COALESCE(contact_extracted_at, now()),
+          contact_extraction_error = ${null},
+          updated_at = now()
+        WHERE id = ${row.id} AND tenant_id = ${tenantId}
+      `;
+      continue;
+    }
+    const resume = row.extracted_resume_text?.trim() ?? "";
+    if (!resume) {
+      await sql`
+        UPDATE candidates SET
+          contact_extraction_status = ${"not_found"},
+          contact_extraction_completed_at = now(),
+          contact_extracted_at = now(),
+          contact_extraction_error = ${null},
+          updated_at = now()
+        WHERE id = ${row.id} AND tenant_id = ${tenantId}
+      `;
+      continue;
+    }
+    await applyResumeContactExtraction(user, row.id, resume, {
+      workspaceId: opts?.workspaceId,
+    });
+  }
 }
 
 export interface CandidateDetailRow extends Candidate {
@@ -180,7 +494,8 @@ export async function getCandidateDetail(
 export async function updateCandidateStatus(
   user: AppUser,
   candidateId: string,
-  statusId: string
+  statusId: string,
+  note?: string | null
 ): Promise<{
   changed: boolean;
   previousStatusName: string | null;
@@ -188,6 +503,7 @@ export async function updateCandidateStatus(
   statusId: string;
   changedAt: string;
   changedByName: string | null;
+  note: string | null;
 } | null> {
   const existing = await getCandidateDetail(user, candidateId);
   if (!existing) return null;
@@ -195,6 +511,11 @@ export async function updateCandidateStatus(
   const next = await getStatusById(user, statusId);
   if (!next || !next.is_active) {
     throw new AuthError("Invalid or inactive status.", 400);
+  }
+
+  const trimmedNote = note?.trim() || null;
+  if (trimmedNote && trimmedNote.length > 4000) {
+    throw new AuthError("Note must be 4000 characters or fewer.", 400);
   }
 
   if (existing.current_status_id === statusId) {
@@ -205,36 +526,62 @@ export async function updateCandidateStatus(
       statusId,
       changedAt: existing.last_status_changed_at ?? existing.updated_at,
       changedByName: existing.last_status_changed_by_name,
+      note: null,
     };
   }
 
   const sql = getSql();
   const tenantId = tenantIdOf(user);
-  const rows = (await sql`
-    UPDATE candidates SET
-      current_status_id = ${statusId},
-      last_status_changed_by_user_id = ${user.id},
-      last_status_changed_at = now(),
-      updated_by_user_id = ${user.id},
-      updated_at = now()
-    WHERE id = ${candidateId} AND tenant_id = ${tenantId}
-    RETURNING last_status_changed_at
-  `) as { last_status_changed_at: string }[];
-
-  await logCandidateActivity({
-    tenantId,
-    candidateId,
-    performedByUserId: user.id,
-    actionType: "STATUS_CHANGED",
-    previousValue: existing.status_name,
-    newValue: next.name,
-    metadata: {
-      previous_status_id: existing.current_status_id,
-      new_status_id: statusId,
-    },
-    actorRole: user.role,
-    requestId: `status:${candidateId}:${statusId}:${rows[0].last_status_changed_at}`,
+  const metadata = buildStatusChangeMetadata({
+    previousStatusId: existing.current_status_id,
+    newStatusId: statusId,
+    note: trimmedNote,
   });
+  const changedAt = new Date().toISOString();
+  const requestId = `status:${candidateId}:${statusId}:${changedAt}`;
+  const source = sourceFromRole(user.role);
+
+  const txResults = (await sql.transaction((tx) => [
+    tx`
+      UPDATE candidates SET
+        current_status_id = ${statusId},
+        last_status_changed_by_user_id = ${user.id},
+        last_status_changed_at = ${changedAt}::timestamptz,
+        updated_by_user_id = ${user.id},
+        updated_at = now()
+      WHERE id = ${candidateId} AND tenant_id = ${tenantId}
+      RETURNING last_status_changed_at
+    `,
+    tx`
+      INSERT INTO candidate_activity_logs (
+        tenant_id, candidate_id, job_id, performed_by_user_id,
+        action_type, previous_value, new_value, metadata,
+        request_id, source, analysis_id, note_id, action_label
+      ) VALUES (
+        ${tenantId},
+        ${candidateId},
+        ${null},
+        ${user.id},
+        ${"STATUS_CHANGED"},
+        ${existing.status_name},
+        ${next.name},
+        ${JSON.stringify(metadata)},
+        ${requestId},
+        ${source},
+        ${null},
+        ${null},
+        ${null}
+      )
+      ON CONFLICT (tenant_id, request_id)
+      DO NOTHING
+      RETURNING id
+    `,
+  ])) as Array<Array<{ last_status_changed_at?: string; id?: string }>>;
+
+  const updated = txResults[0]?.[0];
+  const statusChangedAt =
+    (updated?.last_status_changed_at as string | undefined) ?? changedAt;
+
   const semantic = mapStatusNameToActivityType(next.name);
   if (semantic) {
     await logCandidateActivity({
@@ -248,9 +595,10 @@ export async function updateCandidateStatus(
         previous_status_id: existing.current_status_id,
         new_status_id: statusId,
         derived_from: "STATUS_CHANGED",
+        ...(trimmedNote ? { note: trimmedNote } : {}),
       },
       actorRole: user.role,
-      requestId: `status-semantic:${candidateId}:${statusId}:${rows[0].last_status_changed_at}`,
+      requestId: `status-semantic:${candidateId}:${statusId}:${statusChangedAt}`,
     });
   }
   await audit({
@@ -260,7 +608,11 @@ export async function updateCandidateStatus(
     entityId: candidateId,
     action: "STATUS_CHANGED",
     previousValue: { status_id: existing.current_status_id, name: existing.status_name },
-    newValue: { status_id: statusId, name: next.name },
+    newValue: {
+      status_id: statusId,
+      name: next.name,
+      ...(trimmedNote ? { note: trimmedNote } : {}),
+    },
   });
 
   return {
@@ -268,8 +620,9 @@ export async function updateCandidateStatus(
     previousStatusName: existing.status_name,
     newStatusName: next.name,
     statusId,
-    changedAt: rows[0].last_status_changed_at,
+    changedAt: statusChangedAt,
     changedByName: user.name,
+    note: trimmedNote,
   };
 }
 
@@ -556,10 +909,13 @@ export async function removeCandidateFromJob(
 export interface DashboardCandidateRow {
   candidate_id: string;
   full_name: string | null;
+  email: string | null;
+  phone: string | null;
   specialty: string | null;
   location: string | null;
   workspace_id: string | null;
   job_title: string | null;
+  job_code: string | null;
   match_score: number | null;
   match_category: string | null;
   submission_readiness: string | null;
@@ -617,6 +973,8 @@ export async function listDashboardCandidates(
       SELECT
         c.id AS candidate_id,
         c.full_name,
+        c.email,
+        c.phone,
         c.specialty,
         c.location,
         (
@@ -635,6 +993,14 @@ export async function listDashboardCandidates(
           ORDER BY jmc.updated_at DESC
           LIMIT 1
         ) AS job_title,
+        (
+          SELECT w.job_ref
+          FROM job_match_candidates jmc
+          JOIN job_match_workspaces w ON w.id = jmc.workspace_id
+          WHERE jmc.candidate_id = c.id AND w.tenant_id = ${tenantId}
+          ORDER BY jmc.updated_at DESC
+          LIMIT 1
+        ) AS job_code,
         (
           SELECT a.overall_match_score
           FROM job_match_candidates jmc
@@ -710,17 +1076,20 @@ export async function listDashboardCandidates(
         AND (${dateTo}::timestamptz IS NULL OR c.updated_at <= ${dateTo}::timestamptz)
       ORDER BY c.updated_at DESC
     `) as DashboardCandidateRow[];
-    return rows;
+    return redactCandidateContact(rows, user.role);
   }
 
   const rows = (await sql`
     SELECT
       c.id AS candidate_id,
       c.full_name,
+      c.email,
+      c.phone,
       c.specialty,
       c.location,
       jmc.workspace_id,
       w.job_title,
+      w.job_ref AS job_code,
       a.overall_match_score AS match_score,
       a.match_category,
       a.submission_readiness,
@@ -772,7 +1141,19 @@ export async function listDashboardCandidates(
       AND (${dateTo}::timestamptz IS NULL OR c.updated_at <= ${dateTo}::timestamptz)
     ORDER BY a.overall_match_score DESC NULLS LAST, c.full_name ASC
   `) as DashboardCandidateRow[];
-  return rows;
+  return redactCandidateContact(rows, user.role);
+}
+
+function redactCandidateContact(
+  rows: DashboardCandidateRow[],
+  role: AppUser["role"]
+): DashboardCandidateRow[] {
+  if (canViewCandidateContact(role)) return rows;
+  return rows.map((row) => ({
+    ...row,
+    email: null,
+    phone: null,
+  }));
 }
 
 // Resolves a workspace this candidate belongs to (used when the detail page is
@@ -799,11 +1180,50 @@ export async function listWorkspaceCandidates(
 ): Promise<RankedCandidateRow[]> {
   const sql = getSql();
   const tenantId = tenantIdOf(user);
+
+  // Resolve stuck/legacy pending contact extraction before returning rows.
+  // Never let recovery failures take down the ranking page.
+  try {
+    const pendingIds = (await sql`
+      SELECT c.id
+      FROM job_match_candidates jmc
+      JOIN candidates c ON c.id = jmc.candidate_id
+      JOIN job_match_workspaces w ON w.id = jmc.workspace_id
+      WHERE jmc.workspace_id = ${workspaceId}
+        AND w.tenant_id = ${tenantId}
+        AND c.tenant_id = ${tenantId}
+        AND lower(COALESCE(c.contact_extraction_status, 'pending')) IN (
+          'pending', 'processing', 'not_processed'
+        )
+    `) as Array<{ id: string }>;
+    if (pendingIds.length > 0) {
+      await resolvePendingContactExtractions(
+        user,
+        pendingIds.map((r) => r.id),
+        { workspaceId, limit: 12 }
+      );
+    }
+  } catch (err) {
+    console.error("[contact-extract] list recovery failed", {
+      workspaceId,
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   const rows = (await sql`
     SELECT
       jmc.id AS job_match_candidate_id,
       jmc.candidate_id,
       c.full_name,
+      c.full_name AS candidate_name,
+      w.job_ref AS job_code,
+      c.phone AS phone_number,
+      c.email,
+      c.contact_extraction_status,
+      c.contact_extraction_started_at,
+      c.contact_extraction_completed_at,
+      c.contact_extraction_error,
+      c.contact_extraction_attempts,
       jmc.status,
       jmc.latest_analysis_id,
       a.overall_match_score AS match_score,
@@ -853,31 +1273,55 @@ export async function listWorkspaceCandidates(
     ORDER BY a.overall_match_score DESC NULLS LAST, c.full_name ASC
   `) as Array<Record<string, unknown>>;
 
-  return rows.map((r) => ({
-    job_match_candidate_id: r.job_match_candidate_id as string,
-    candidate_id: r.candidate_id as string,
-    full_name: (r.full_name as string) ?? null,
-    status: r.status as CandidatePipelineStatus,
-    latest_analysis_id: (r.latest_analysis_id as string) ?? null,
-    match_score: num(r.match_score),
-    match_category: (r.match_category as string) ?? null,
-    submission_readiness: (r.submission_readiness as string) ?? null,
-    recommended_action: (r.recommended_action as string) ?? null,
-    confidence_score: num(r.confidence_score),
-    mandatory_confirmed: num(r.mandatory_confirmed),
-    mandatory_verify: num(r.mandatory_verify),
-    mandatory_not_met: num(r.mandatory_not_met),
-    disposition: (r.disposition as string) ?? null,
-    analyzed_at: (r.analyzed_at as string) ?? null,
-    updated_at: r.updated_at as string,
-    ai_provider: (r.ai_provider as string) ?? null,
-    ai_model: (r.ai_model as string) ?? null,
-    current_status_id: (r.current_status_id as string) ?? null,
-    status_name: (r.status_name as string) ?? null,
-    status_color: (r.status_color as string) ?? null,
-    last_status_changed_by_name: (r.last_status_changed_by_name as string) ?? null,
-    last_status_changed_at: (r.last_status_changed_at as string) ?? null,
-    assigned_recruiter_name: (r.assigned_recruiter_name as string) ?? null,
-    notes_count: Number(r.notes_count ?? 0),
-  }));
+  const canViewContact = canViewCandidateContact(user.role);
+
+  return rows.map((r) => {
+    const fullName = (r.full_name as string) ?? null;
+    const email = canViewContact ? ((r.email as string) ?? null) : null;
+    const phone = canViewContact
+      ? ((r.phone_number as string) ?? null)
+      : null;
+    return {
+      job_match_candidate_id: r.job_match_candidate_id as string,
+      candidate_id: r.candidate_id as string,
+      full_name: fullName,
+      candidate_name: (r.candidate_name as string) ?? fullName,
+      job_code: (r.job_code as string) ?? null,
+      phone_number: phone,
+      email,
+      can_view_contact: canViewContact,
+      contact_extraction_status:
+        (r.contact_extraction_status as string) ?? "pending",
+      contact_extraction_started_at:
+        (r.contact_extraction_started_at as string) ?? null,
+      contact_extraction_completed_at:
+        (r.contact_extraction_completed_at as string) ?? null,
+      contact_extraction_error: canViewContact
+        ? ((r.contact_extraction_error as string) ?? null)
+        : null,
+      contact_extraction_attempts: Number(r.contact_extraction_attempts ?? 0),
+      status: r.status as CandidatePipelineStatus,
+      latest_analysis_id: (r.latest_analysis_id as string) ?? null,
+      match_score: num(r.match_score),
+      match_category: (r.match_category as string) ?? null,
+      submission_readiness: (r.submission_readiness as string) ?? null,
+      recommended_action: (r.recommended_action as string) ?? null,
+      confidence_score: num(r.confidence_score),
+      mandatory_confirmed: num(r.mandatory_confirmed),
+      mandatory_verify: num(r.mandatory_verify),
+      mandatory_not_met: num(r.mandatory_not_met),
+      disposition: (r.disposition as string) ?? null,
+      analyzed_at: (r.analyzed_at as string) ?? null,
+      updated_at: r.updated_at as string,
+      ai_provider: (r.ai_provider as string) ?? null,
+      ai_model: (r.ai_model as string) ?? null,
+      current_status_id: (r.current_status_id as string) ?? null,
+      status_name: (r.status_name as string) ?? null,
+      status_color: (r.status_color as string) ?? null,
+      last_status_changed_by_name: (r.last_status_changed_by_name as string) ?? null,
+      last_status_changed_at: (r.last_status_changed_at as string) ?? null,
+      assigned_recruiter_name: (r.assigned_recruiter_name as string) ?? null,
+      notes_count: Number(r.notes_count ?? 0),
+    };
+  });
 }

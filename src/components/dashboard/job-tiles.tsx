@@ -22,7 +22,15 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
-export function JobTiles({ workspaces }: { workspaces: WorkspaceSummary[] }) {
+export function JobTiles({
+  workspaces,
+  emptyMessage,
+  emptyAction,
+}: {
+  workspaces: WorkspaceSummary[];
+  emptyMessage?: string;
+  emptyAction?: { label: string; href: string };
+}) {
   const router = useRouter();
   const { toast } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
@@ -55,13 +63,24 @@ export function JobTiles({ workspaces }: { workspaces: WorkspaceSummary[] }) {
     return (
       <Card>
         <CardBody className="py-10 text-center">
-          <p className="text-sm text-slate-500">No job workspaces yet.</p>
-          <Link
-            href="/jobs/new"
-            className="mt-3 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
-          >
-            + Create Job Workspace
-          </Link>
+          <p className="text-sm text-slate-500">
+            {emptyMessage || "No job workspaces yet."}
+          </p>
+          {emptyAction ? (
+            <Link
+              href={emptyAction.href}
+              className="mt-3 inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {emptyAction.label}
+            </Link>
+          ) : !emptyMessage ? (
+            <Link
+              href="/jobs/new"
+              className="mt-3 inline-flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
+            >
+              + Create Job Workspace
+            </Link>
+          ) : null}
         </CardBody>
       </Card>
     );

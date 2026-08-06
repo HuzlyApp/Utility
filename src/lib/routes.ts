@@ -6,8 +6,25 @@
  */
 
 export const jobRoutes = {
-  list: (status?: "active" | "archived" | "all") =>
-    status && status !== "all" ? `/jobs?status=${status}` : "/jobs",
+  list: (
+    statusOrOpts?:
+      | "active"
+      | "archived"
+      | "all"
+      | { status?: "active" | "archived" | "all"; q?: string }
+  ) => {
+    const opts =
+      typeof statusOrOpts === "string" || statusOrOpts == null
+        ? { status: statusOrOpts }
+        : statusOrOpts;
+    const status = opts.status;
+    const q = opts.q?.trim();
+    const params = new URLSearchParams();
+    if (status && status !== "all") params.set("status", status);
+    if (q) params.set("q", q);
+    const qs = params.toString();
+    return qs ? `/jobs?${qs}` : "/jobs";
+  },
   workspace: (jobId: string) => `/jobs/${jobId}`,
   addCandidates: (jobId: string) => `/jobs/${jobId}/candidates/add`,
   edit: (jobId: string) => `/jobs/${jobId}/edit`,

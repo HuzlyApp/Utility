@@ -16,7 +16,10 @@ export async function PATCH(
     const existing = await getCandidate(user, params.candidateId);
     if (!existing) return fail("Candidate not found.", 404, "NOT_FOUND");
     const body = (await req.json()) as CandidateInput;
-    await updateCandidate(user, params.candidateId, body);
+    await updateCandidate(user, params.candidateId, {
+      ...body,
+      contactManualEdit: true,
+    });
     return ok({ id: params.candidateId });
   });
 }

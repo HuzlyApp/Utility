@@ -10,6 +10,7 @@ import {
   type StatusOption,
 } from "@/components/candidate/candidate-status-select";
 import { ModelBadge } from "@/components/workspace/ai-model-selector";
+import { CandidateIdentityCell } from "@/components/workspace/candidate-identity-cell";
 import { displayCandidateName } from "@/lib/resume-name";
 
 /**
@@ -92,10 +93,12 @@ export function CandidateCard({
   progress,
   busy,
   batchRunning,
+  retryingContact = false,
   onToggleSelect,
   onAnalyze,
   onOpenNotes,
   onStatusChanged,
+  onRetryContactExtraction,
 }: {
   row: RankedCandidateRow;
   index: number;
@@ -105,10 +108,12 @@ export function CandidateCard({
   progress?: CandidateProgressInfo;
   busy: boolean;
   batchRunning: boolean;
+  retryingContact?: boolean;
   onToggleSelect: (candidateId: string, hasAnalysis: boolean) => void;
   onAnalyze: (candidateId: string) => void;
   onOpenNotes: (candidateId: string, name: string) => void;
   onStatusChanged: () => void;
+  onRetryContactExtraction?: (candidateId: string) => void;
 }) {
   const candidateHref = `/candidates/${row.candidate_id}?w=${workspaceId}`;
   const name = displayCandidateName(row.full_name);
@@ -129,25 +134,31 @@ export function CandidateCard({
           />
         )}
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
+          <div className="flex flex-wrap items-start gap-2">
+            <CandidateIdentityCell
+              name={row.candidate_name ?? row.full_name}
               href={candidateHref}
-              className="break-words text-[15px] font-semibold text-slate-900 hover:text-brand-700"
-            >
-              {name}
-            </Link>
-            <span className="text-xs text-slate-400">#{index + 1}</span>
+              jobCode={row.job_code}
+              phone={row.phone_number}
+              email={row.email}
+              canViewContact={row.can_view_contact}
+              contactExtractionStatus={row.contact_extraction_status}
+              contactExtractionStartedAt={row.contact_extraction_started_at}
+              contactExtractionAttempts={row.contact_extraction_attempts}
+              canRetryExtraction={row.can_view_contact}
+              retrying={retryingContact}
+              onRetryExtraction={
+                onRetryContactExtraction
+                  ? () => onRetryContactExtraction(row.candidate_id)
+                  : undefined
+              }
+              disposition={row.disposition}
+              progressLabel={showProgress ? progress!.label : null}
+              className="min-w-0 max-w-none flex-1"
+              nameClassName="text-[15px]"
+            />
+            <span className="shrink-0 text-xs text-slate-400">#{index + 1}</span>
           </div>
-          {row.disposition && (
-            <span className="mt-0.5 inline-block text-[10px] uppercase tracking-wide text-slate-400">
-              {row.disposition.replace(/_/g, " ")}
-            </span>
-          )}
-          {showProgress && (
-            <p className="mt-1 break-words text-xs font-medium text-blue-700">
-              {progress!.label}
-            </p>
-          )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           {row.match_score != null ? (
@@ -200,6 +211,7 @@ export function CandidateCard({
         </p>
         <CandidateStatusSelect
           candidateId={row.candidate_id}
+          candidateName={row.candidate_name ?? row.full_name}
           statuses={statuses}
           value={row.current_status_id}
           statusName={row.status_name}
@@ -207,6 +219,7 @@ export function CandidateCard({
           updatedByName={row.last_status_changed_by_name}
           updatedAt={row.last_status_changed_at}
           showAttribution={Boolean(row.last_status_changed_by_name)}
+          showHistoryAction
           fullWidth
           onChanged={onStatusChanged}
         />

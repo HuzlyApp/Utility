@@ -205,7 +205,7 @@ export function MatchAssessment({
           <DataQualityPanel result={r} scoreAdjustments={data.score_adjustments} />
         </div>
 
-        {/* Sticky sidebar: candidate list + recruiter decision */}
+        {/* Sticky sidebar: candidate list + final decision */}
         <div className="space-y-6 lg:sticky lg:top-4 lg:self-start">
           <CandidateRankingPanel
             candidates={workspace.candidates}

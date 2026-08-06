@@ -2,7 +2,8 @@
 
 export async function patchCandidateStatus(
   candidateId: string,
-  statusId: string
+  statusId: string,
+  note?: string | null
 ): Promise<{
   changed: boolean;
   statusId: string;
@@ -10,11 +11,16 @@ export async function patchCandidateStatus(
   newStatusName: string | null;
   changedAt: string;
   changedByName: string | null;
+  note: string | null;
 }> {
+  const payload: { statusId: string; note?: string } = { statusId };
+  const trimmed = note?.trim();
+  if (trimmed) payload.note = trimmed;
+
   const res = await fetch(`/api/candidates/${candidateId}/status`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ statusId }),
+    body: JSON.stringify(payload),
   });
   const data = await res.json();
   if (!res.ok || !data.success) {

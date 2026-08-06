@@ -6,10 +6,11 @@ import {
   getRecentAnalyses,
 } from "@/lib/dal/workspaces";
 import { Card, CardBody } from "@/components/ui/primitives";
-import { JobTiles } from "@/components/dashboard/job-tiles";
+import { DashboardJobWorkspaces } from "@/components/dashboard/dashboard-job-workspaces";
 import { RecentAnalyses } from "@/components/dashboard/recent-analyses";
 import { redirect } from "next/navigation";
 import { dashboardStatRoutes } from "@/lib/routes";
+import { normalizeSearchQuery } from "@/lib/candidate-crm";
 import { cn } from "@/lib/cn";
 
 export const dynamic = "force-dynamic";
@@ -51,13 +52,19 @@ function StatCard({
   );
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: { q?: string };
+}) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
+  const search = normalizeSearchQuery(searchParams.q);
+
   const [stats, workspaces, recent] = await Promise.all([
     getDashboardStats(user),
-    listWorkspaces(user),
+    listWorkspaces(user, { search: search || undefined }),
     getRecentAnalyses(user),
   ]);
 
@@ -112,18 +119,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr,320px]">
-        <section>
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold text-slate-700">Job Workspaces</h2>
-            <Link
-              href={dashboardStatRoutes.activeJobs}
-              className="text-xs font-medium text-brand-600 hover:underline"
-            >
-              View all
-            </Link>
-          </div>
-          <JobTiles workspaces={workspaces} />
-        </section>
+        <DashboardJobWorkspaces workspaces={workspaces} searchQuery={search} />
         <section>
           <h2 className="mb-3 text-sm font-semibold text-slate-700">Recent Analyses</h2>
           <RecentAnalyses items={recent} />

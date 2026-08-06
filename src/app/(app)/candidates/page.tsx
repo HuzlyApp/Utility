@@ -16,6 +16,7 @@ import {
   parseCandidateFilterParam,
   type CandidateListFilter,
 } from "@/lib/routes";
+import { canViewCandidateContact } from "@/lib/auth/rbac";
 import { cn } from "@/lib/cn";
 
 export const dynamic = "force-dynamic";
@@ -123,7 +124,11 @@ export default async function CandidatesListPage({
         />
       </Suspense>
 
-      <CandidateList items={items} statuses={statuses} />
+      <CandidateList
+        items={items}
+        statuses={statuses}
+        canViewContact={canViewCandidateContact(user.role)}
+      />
     </div>
   );
 }

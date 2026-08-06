@@ -24,11 +24,22 @@ export async function PATCH(
 ) {
   return withTenantUser("candidates.status.patch", async (user) => {
     try {
-      const body = (await req.json()) as { statusId?: string };
+      const body = (await req.json()) as { statusId?: string; note?: string | null };
       const statusId = (body.statusId ?? "").trim();
       if (!statusId) return fail("statusId is required.", 400, "MISSING_STATUS");
 
-      const result = await updateCandidateStatus(user, params.candidateId, statusId);
+      const note =
+        typeof body.note === "string" ? body.note : body.note == null ? null : undefined;
+      if (note === undefined && body.note !== undefined) {
+        return fail("note must be a string.", 400, "INVALID_NOTE");
+      }
+
+      const result = await updateCandidateStatus(
+        user,
+        params.candidateId,
+        statusId,
+        note ?? null
+      );
       if (!result) return fail("Candidate not found.", 404, "NOT_FOUND");
 
       return ok({
@@ -39,6 +50,7 @@ export async function PATCH(
         newStatusName: result.newStatusName,
         changedAt: result.changedAt,
         changedByName: result.changedByName,
+        note: result.note,
       });
     } catch (err) {
       if (err instanceof AuthError) {

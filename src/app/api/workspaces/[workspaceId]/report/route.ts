@@ -35,7 +35,7 @@ export async function GET(
       "Clearly Not Met",
       "Submission Readiness",
       "Recommended Action",
-      "Recruiter Decision",
+      "Final Decision",
       "Analysis Status",
       "Last Updated",
     ];

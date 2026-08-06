@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import { getCurrentUser } from "@/lib/auth/session";
 import { listWorkspaces } from "@/lib/dal/workspaces";
 import { JobTiles } from "@/components/dashboard/job-tiles";
+import { JobSearchInput } from "@/components/dashboard/job-search-input";
 import { parseJobStatusParam, jobRoutes } from "@/lib/routes";
+import { normalizeSearchQuery } from "@/lib/candidate-crm";
 import { cn } from "@/lib/cn";
 
 export const dynamic = "force-dynamic";
@@ -17,14 +20,16 @@ const STATUS_TABS = [
 export default async function JobsListPage({
   searchParams,
 }: {
-  searchParams: { status?: string };
+  searchParams: { status?: string; q?: string };
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
   const status = parseJobStatusParam(searchParams.status);
+  const search = normalizeSearchQuery(searchParams.q);
   const workspaces = await listWorkspaces(user, {
     includeArchived: status === "archived" || status === "all",
+    search: search || undefined,
   });
   const filtered =
     status === "archived"
@@ -60,10 +65,11 @@ export default async function JobsListPage({
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Job status filter">
         {STATUS_TABS.map((tab) => {
           const active = status === tab.value;
+          const href = jobRoutes.list({ status: tab.value, q: search || undefined });
           return (
             <Link
               key={tab.value}
-              href={jobRoutes.list(tab.value)}
+              href={href}
               role="tab"
               aria-selected={active}
               className={cn(
@@ -79,7 +85,24 @@ export default async function JobsListPage({
         })}
       </div>
 
-      <JobTiles workspaces={filtered} />
+      <Suspense fallback={null}>
+        <JobSearchInput initialQuery={search} />
+      </Suspense>
+
+      <JobTiles
+        workspaces={filtered}
+        emptyMessage={
+          search ? "No job workspaces match your search." : undefined
+        }
+        emptyAction={
+          search
+            ? {
+                label: "Clear search",
+                href: jobRoutes.list({ status }),
+              }
+            : undefined
+        }
+      />
     </div>
   );
 }

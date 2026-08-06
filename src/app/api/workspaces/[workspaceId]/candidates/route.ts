@@ -8,6 +8,7 @@ import {
   updateCandidate,
   attachCandidateToWorkspace,
   listWorkspaceCandidates,
+  applyResumeContactExtraction,
 } from "@/lib/dal/candidates";
 import { saveEntityFile } from "@/lib/dal/fileStore";
 import { validateUpload, extractFromUpload } from "@/lib/files";
@@ -238,6 +239,15 @@ export async function POST(
       extraction_quality: anyNeedsReview ? "LOW" : combined ? "HIGH" : "FAILED",
     });
 
+    const primaryFileType =
+      fileResults.find((f) => f.status !== "FAILED")?.file_name?.split(".").pop() ??
+      (pastedText ? "txt" : null);
+
+    const contact = await applyResumeContactExtraction(user, candidateId, combined, {
+      workspaceId: params.workspaceId,
+      fileType: primaryFileType,
+    });
+
     await attachCandidateToWorkspace(user, params.workspaceId, candidateId, status);
 
     return ok({
@@ -245,6 +255,9 @@ export async function POST(
       status,
       files: fileResults,
       has_text: Boolean(combined),
+      contact_extraction_status: contact.status,
+      email: contact.email,
+      phone: contact.phone,
     });
   });
 }
