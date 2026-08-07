@@ -264,6 +264,51 @@ export async function getEntityImageBytes(
     }));
 }
 
+export async function getCandidateResumeFilesWithBytes(
+  user: AppUser,
+  candidateId: string
+): Promise<
+  Array<{
+    id: string;
+    fileName: string;
+    fileType: string | null;
+    mimeType: string | null;
+    isImage: boolean;
+    extractedText: string | null;
+    bytes: Buffer | null;
+  }>
+> {
+  const sql = getSql();
+  const tenantId = tenantIdOf(user);
+  const rows = (await sql`
+    SELECT f.id, f.file_name, f.file_type, f.mime_type, f.is_image,
+           f.extracted_text, encode(f.file_bytes, 'base64') AS file_b64
+    FROM entity_files f
+    JOIN candidates c ON c.id = f.entity_id AND c.tenant_id = ${tenantId}
+    WHERE f.entity_type = 'candidate'
+      AND f.entity_id = ${candidateId}
+    ORDER BY f.page_order ASC, f.created_at ASC
+  `) as Array<{
+    id: string;
+    file_name: string;
+    file_type: string | null;
+    mime_type: string | null;
+    is_image: boolean;
+    extracted_text: string | null;
+    file_b64: string | null;
+  }>;
+
+  return rows.map((r) => ({
+    id: r.id,
+    fileName: r.file_name,
+    fileType: r.file_type,
+    mimeType: r.mime_type,
+    isImage: Boolean(r.is_image),
+    extractedText: r.extracted_text,
+    bytes: r.file_b64 ? Buffer.from(r.file_b64, "base64") : null,
+  }));
+}
+
 // Combines a candidate's page-ordered résumé file text into one string used as
 // the résumé for analysis (spec §5 multi-page grouping).
 export async function combineCandidateResumeText(

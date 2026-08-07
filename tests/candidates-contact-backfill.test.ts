@@ -51,14 +51,14 @@ describe("candidates page background contact extraction", () => {
     expect(listUi).toContain("/api/candidates/contact-extraction/run");
     expect(listUi).toContain("CONTACT_EXTRACTION_POLL_MS");
     expect(listUi).toContain("isContactExtractionInFlight");
-    expect(listUi).toContain("displayContactValue");
-    expect(listUi).toContain("Extraction failed");
+    expect(listUi).toContain("getContactFieldUiState");
+    expect(listUi).toContain("contact-extraction/retry");
     expect(listUi).toContain("Retry");
   });
 
-  it("treats queued as in-flight and maps stale to failed", () => {
+  it("treats queued as in-flight and keeps stale as a distinct status", () => {
     expect(normalizeContactExtractionStatus("queued")).toBe("queued");
-    expect(normalizeContactExtractionStatus("stale")).toBe("failed");
+    expect(normalizeContactExtractionStatus("stale")).toBe("stale");
     expect(isContactExtractionInFlight("queued", null)).toBe(true);
     expect(isContactExtractionInFlight("completed", null)).toBe(false);
   });

@@ -5,6 +5,7 @@ import { fail, ok, logServerError } from "@/lib/http";
 import { getAnalysis, replaceAnalysisWithUpdatedResume } from "@/lib/dal/analyses";
 import { getWorkspace } from "@/lib/dal/workspaces";
 import {
+  applyResumeContactExtraction,
   getCandidate,
   getJobCandidate,
   releaseResumeUpdateLock,
@@ -214,6 +215,16 @@ export async function POST(
         scoreAdjustments: analysisResult.scoreAdjustments,
         model: analysisResult.model,
         provider: analysisResult.provider,
+      });
+
+      // Re-run contact extraction for the new résumé version (preserves manual values).
+      const refreshed = await getCandidate(user, candidate.id);
+      await applyResumeContactExtraction(user, candidate.id, resumeText, {
+        workspaceId: workspace.id,
+        fileType: validation.ext,
+        resumeVersion: Number(
+          refreshed?.contact_extraction_resume_version ?? update.resumeVersion ?? 1
+        ),
       });
 
       await audit({

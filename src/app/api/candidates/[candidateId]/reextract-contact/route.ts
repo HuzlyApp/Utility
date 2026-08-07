@@ -4,21 +4,24 @@ import { withTenantUser } from "@/lib/api-helpers";
 import { AuthError } from "@/lib/auth/session";
 import { canViewCandidateContact } from "@/lib/auth/rbac";
 import {
-  applyResumeContactExtraction,
   getCandidate,
+  retryCandidateContactExtraction,
 } from "@/lib/dal/candidates";
 import {
   CONTACT_EXTRACTION_MAX_ATTEMPTS,
+  buildContactExtractionApiSummary,
   canRetryContactExtraction,
+  hasCompleteContactDetails,
 } from "@/lib/contact-extract";
-import { getSql } from "@/lib/dal/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 /**
- * Re-extract phone/email from stored résumé text.
- * Body: { force?: boolean } — force overwrites manual corrections.
+ * Manually retry contact extraction from the stored résumé file(s).
+ * Re-reads file bytes when available, re-parses text, then extracts email/phone.
+ * Body: { force?: boolean }
  */
 export async function POST(
   req: NextRequest,
@@ -36,12 +39,36 @@ export async function POST(
       const force = Boolean(body.force);
       const attempts = Number(candidate.contact_extraction_attempts ?? 0);
 
+      if (hasCompleteContactDetails(candidate) && !force) {
+        const summary = buildContactExtractionApiSummary({
+          status: "completed",
+          attempts,
+          startedAt: candidate.contact_extraction_started_at,
+          completedAt: candidate.contact_extraction_completed_at,
+        });
+        return ok({
+          candidate_id: params.candidateId,
+          candidateId: params.candidateId,
+          status: "completed",
+          attempt: attempts,
+          email: candidate.email,
+          phone: candidate.phone,
+          phone_number: candidate.phone,
+          attempts,
+          error: null,
+          contact_extraction: summary,
+          deduplicated: true,
+          resume_reloaded: false,
+        });
+      }
+
       if (
         !force &&
         !canRetryContactExtraction({
           status: candidate.contact_extraction_status,
           attempts,
           startedAt: candidate.contact_extraction_started_at,
+          force,
         }) &&
         attempts >= CONTACT_EXTRACTION_MAX_ATTEMPTS
       ) {
@@ -52,41 +79,32 @@ export async function POST(
         );
       }
 
-      if (!candidate.extracted_resume_text?.trim()) {
-        return fail(
-          "No résumé text available to extract contact details from.",
-          400,
-          "NO_RESUME_TEXT"
-        );
-      }
-
-      // Reset to pending before the attempt so UI never stays on a prior failure.
-      const sql = getSql();
-      if (!user.tenantId) {
-        return fail("Tenant context is required.", 403, "FORBIDDEN");
-      }
-      await sql`
-        UPDATE candidates SET
-          contact_extraction_status = ${"pending"},
-          contact_extraction_error = ${null},
-          updated_at = now()
-        WHERE id = ${params.candidateId} AND tenant_id = ${user.tenantId}
-      `;
-
-      const result = await applyResumeContactExtraction(
+      const result = await retryCandidateContactExtraction(
         user,
         params.candidateId,
-        candidate.extracted_resume_text,
         { force }
       );
 
+      const summary = buildContactExtractionApiSummary({
+        status: result.status,
+        attempts: result.attempts,
+        completedAt: new Date().toISOString(),
+      });
+
       return ok({
+        candidate_id: params.candidateId,
         candidateId: params.candidateId,
         status: result.status,
+        attempt: result.attempts,
         email: result.email,
         phone: result.phone,
+        phone_number: result.phone,
         attempts: result.attempts,
         error: result.error,
+        contact_extraction: summary,
+        deduplicated: result.deduplicated,
+        resume_reloaded: result.resumeReloaded,
+        file_type: result.fileType,
       });
     } catch (err) {
       if (err instanceof AuthError) {

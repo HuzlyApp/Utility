@@ -280,11 +280,14 @@ export function RankingTable({
   async function retryContactExtraction(candidateId: string) {
     setRetryingContactId(candidateId);
     try {
-      const res = await fetch(`/api/candidates/${candidateId}/reextract-contact`, {
+      const res = await fetch(
+        `/api/candidates/${candidateId}/contact-extraction/retry`,
+        {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ force: false }),
-      });
+        }
+      );
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.error ?? "Retry failed.");

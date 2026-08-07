@@ -304,10 +304,15 @@ export async function replaceAnalysisWithUpdatedResume(
           extracted_resume_text = ${params.resumeText},
           extraction_quality = ${params.extractedQuality},
           ocr_confidence = ${params.ocrConfidence},
+          contact_extraction_resume_version = COALESCE(contact_extraction_resume_version, 0) + 1,
+          contact_extraction_status = ${"not_started"},
+          contact_extraction_error = NULL,
+          contact_extraction_error_category = NULL,
+          contact_extraction_attempts = 0,
           updated_at = now()
         WHERE id = ${params.candidateId}
           AND tenant_id = ${tenantId}
-        RETURNING id
+        RETURNING id, contact_extraction_resume_version
       ),
       update_analysis AS (
         UPDATE candidate_match_analyses

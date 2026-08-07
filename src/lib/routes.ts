@@ -33,10 +33,30 @@ export const jobRoutes = {
 export const candidateRoutes = {
   list: (filter?: CandidateListFilter) =>
     filter && filter !== "all" ? `/candidates?filter=${filter}` : "/candidates",
-  detail: (candidateId: string, workspaceId?: string | null) =>
-    workspaceId
-      ? `/candidates/${candidateId}?w=${workspaceId}`
-      : `/candidates/${candidateId}`,
+  detail: (
+    candidateId: string,
+    workspaceId?: string | null,
+    returnTo?: string | null
+  ) => {
+    const params = new URLSearchParams();
+    if (workspaceId) params.set("w", workspaceId);
+    if (returnTo?.trim()) params.set("from", returnTo.trim());
+    const qs = params.toString();
+    return qs ? `/candidates/${candidateId}?${qs}` : `/candidates/${candidateId}`;
+  },
+  /** Build a candidates list href that preserves current search/filter params. */
+  listWithParams: (searchParams: URLSearchParams | Record<string, string | undefined>) => {
+    const params =
+      searchParams instanceof URLSearchParams
+        ? new URLSearchParams(searchParams.toString())
+        : new URLSearchParams(
+            Object.entries(searchParams).filter(
+              (entry): entry is [string, string] => Boolean(entry[1])
+            )
+          );
+    const qs = params.toString();
+    return qs ? `/candidates?${qs}` : "/candidates";
+  },
 };
 
 export const dashboardStatRoutes = {

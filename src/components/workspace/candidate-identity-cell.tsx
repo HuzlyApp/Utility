@@ -3,10 +3,8 @@
 import Link from "next/link";
 import { displayOrDash } from "@/lib/candidate-crm";
 import {
-  canRetryContactExtraction,
-  displayContactValue,
+  getContactFieldUiState,
   isContactExtractionInFlight,
-  isContactExtractionStale,
   normalizeContactExtractionStatus,
 } from "@/lib/contact-extract";
 import { displayCandidateName } from "@/lib/resume-name";
@@ -15,6 +13,98 @@ import { cn } from "@/lib/cn";
 function telHref(phone: string): string {
   const digits = phone.replace(/[^\d+]/g, "");
   return digits ? `tel:${digits}` : `tel:${phone.trim()}`;
+}
+
+const candidateLinkClass =
+  "font-medium text-brand-700 hover:text-brand-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-1 rounded-sm";
+
+function FieldLine({
+  label,
+  value,
+  status,
+  startedAt,
+  attempts,
+  canViewContact,
+  href,
+  candidateName,
+  retrying,
+  onRetry,
+}: {
+  label: string;
+  value?: string | null;
+  status?: string | null;
+  startedAt?: string | null;
+  attempts?: number | null;
+  canViewContact: boolean;
+  href?: string | null;
+  candidateName: string;
+  retrying?: boolean;
+  onRetry?: () => void;
+}) {
+  const ui = getContactFieldUiState({
+    value,
+    extractionStatus: status,
+    canViewContact,
+    startedAt,
+    attempts,
+    field: label.toLowerCase().includes("email") ? "email" : "phone",
+  });
+
+  let body: React.ReactNode;
+  if (ui.kind === "value" && href) {
+    body = (
+      <a
+        href={href}
+        className="text-brand-700 hover:underline"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {ui.label}
+      </a>
+    );
+  } else if (ui.kind === "extracting" || retrying) {
+    body = (
+      <span className="inline-flex items-center gap-1 text-slate-600">
+        <span
+          className="inline-block h-2.5 w-2.5 animate-spin rounded-full border border-slate-300 border-t-brand-600"
+          aria-hidden
+        />
+        {retrying ? "Extracting…" : ui.label}
+      </span>
+    );
+  } else if (ui.kind === "retryable") {
+    body = (
+      <span className="inline-flex flex-wrap items-center gap-x-1 text-slate-600">
+        <span>{ui.label}</span>
+        <span aria-hidden>·</span>
+        {ui.canRetry && onRetry ? (
+          <button
+            type="button"
+            className="cursor-pointer font-medium text-brand-700 hover:text-brand-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-1 rounded-sm disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={retrying}
+            aria-label={`Retry contact extraction for ${candidateName}`}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onRetry();
+            }}
+          >
+            Retry
+          </button>
+        ) : (
+          <span>Retry</span>
+        )}
+      </span>
+    );
+  } else {
+    body = <span className="text-slate-600">{ui.label}</span>;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-x-1">
+      <dt className="shrink-0">{label}:</dt>
+      <dd className="min-w-0 break-words">{body}</dd>
+    </div>
+  );
 }
 
 export function CandidateIdentityCell({
@@ -58,50 +148,23 @@ export function CandidateIdentityCell({
     status,
     contactExtractionStartedAt
   );
-  const stale = isContactExtractionStale(status, contactExtractionStartedAt);
-  const showRetry =
-    canRetryExtraction &&
-    canViewContact &&
-    typeof onRetryExtraction === "function" &&
-    canRetryContactExtraction({
-      status: contactExtractionStatus,
-      attempts: contactExtractionAttempts,
-      startedAt: contactExtractionStartedAt,
-    });
-
-  const phoneValue = displayContactValue({
-    value: phone,
-    extractionStatus: contactExtractionStatus,
-    canViewContact,
-    startedAt: contactExtractionStartedAt,
-  });
-  const emailValue = displayContactValue({
-    value: email,
-    extractionStatus: contactExtractionStatus,
-    canViewContact,
-    startedAt: contactExtractionStartedAt,
-  });
-  const phoneLink =
-    canViewContact && phone?.trim() ? telHref(phone.trim()) : null;
-  const emailLink =
-    canViewContact && email?.trim() ? `mailto:${email.trim()}` : null;
+  const onRetry =
+    canRetryExtraction && onRetryExtraction ? onRetryExtraction : undefined;
 
   return (
     <div className={cn("min-w-[14rem] max-w-[22rem]", className)}>
       {href ? (
         <Link
           href={href}
-          className={cn(
-            "block break-words font-semibold text-slate-900 hover:text-brand-700",
-            nameClassName
-          )}
+          aria-label={`View ${displayName} candidate details`}
+          className={cn("block break-words", candidateLinkClass, nameClassName)}
         >
           {displayName}
         </Link>
       ) : (
         <p
           className={cn(
-            "break-words font-semibold text-slate-900",
+            "break-words font-medium text-slate-900",
             nameClassName
           )}
         >
@@ -122,116 +185,32 @@ export function CandidateIdentityCell({
             {displayOrDash(jobCode)}
           </dd>
         </div>
-        {status === "failed" || stale ? (
-          <div className="space-y-1">
-            {(phone?.trim() || email?.trim()) && (
-              <>
-                <div className="flex flex-wrap gap-x-1">
-                  <dt className="shrink-0">Phone:</dt>
-                  <dd className="min-w-0 break-words text-slate-600">
-                    {phoneLink ? (
-                      <a
-                        href={phoneLink}
-                        className="text-brand-700 hover:underline"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {phone!.trim()}
-                      </a>
-                    ) : (
-                      displayOrDash(phone)
-                    )}
-                  </dd>
-                </div>
-                <div className="flex flex-wrap gap-x-1">
-                  <dt className="shrink-0">Email:</dt>
-                  <dd className="min-w-0 break-all text-slate-600">
-                    {emailLink ? (
-                      <a
-                        href={emailLink}
-                        className="text-brand-700 hover:underline"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {email!.trim()}
-                      </a>
-                    ) : (
-                      displayOrDash(email)
-                    )}
-                  </dd>
-                </div>
-              </>
-            )}
-            <p className="text-slate-600">
-              {stale
-                ? "Contact extraction did not complete"
-                : "Contact extraction failed"}
-            </p>
-            {showRetry ? (
-              <button
-                type="button"
-                className="text-brand-700 hover:underline disabled:opacity-60"
-                disabled={retrying}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onRetryExtraction?.();
-                }}
-              >
-                {retrying ? "Retrying…" : "Retry extraction"}
-              </button>
-            ) : null}
-          </div>
-        ) : (
-          <>
-            <div className="flex flex-wrap gap-x-1">
-              <dt className="shrink-0">Phone:</dt>
-              <dd className="min-w-0 break-words">
-                {phoneLink ? (
-                  <a
-                    href={phoneLink}
-                    className="text-brand-700 hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {phoneValue}
-                  </a>
-                ) : (
-                  <span className="inline-flex items-center gap-1 text-slate-600">
-                    {inFlight ? (
-                      <span
-                        className="inline-block h-2.5 w-2.5 animate-spin rounded-full border border-slate-300 border-t-brand-600"
-                        aria-hidden
-                      />
-                    ) : null}
-                    {phoneValue}
-                  </span>
-                )}
-              </dd>
-            </div>
-            <div className="flex flex-wrap gap-x-1">
-              <dt className="shrink-0">Email:</dt>
-              <dd className="min-w-0 break-all">
-                {emailLink ? (
-                  <a
-                    href={emailLink}
-                    className="text-brand-700 hover:underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {emailValue}
-                  </a>
-                ) : (
-                  <span className="inline-flex items-center gap-1 text-slate-600">
-                    {inFlight ? (
-                      <span
-                        className="inline-block h-2.5 w-2.5 animate-spin rounded-full border border-slate-300 border-t-brand-600"
-                        aria-hidden
-                      />
-                    ) : null}
-                    {emailValue}
-                  </span>
-                )}
-              </dd>
-            </div>
-          </>
-        )}
+        <FieldLine
+          label="Phone"
+          value={phone}
+          status={contactExtractionStatus}
+          startedAt={contactExtractionStartedAt}
+          attempts={contactExtractionAttempts}
+          canViewContact={canViewContact}
+          href={canViewContact && phone?.trim() ? telHref(phone.trim()) : null}
+          candidateName={displayName}
+          retrying={retrying && !phone?.trim() && inFlight}
+          onRetry={onRetry}
+        />
+        <FieldLine
+          label="Email"
+          value={email}
+          status={contactExtractionStatus}
+          startedAt={contactExtractionStartedAt}
+          attempts={contactExtractionAttempts}
+          canViewContact={canViewContact}
+          href={
+            canViewContact && email?.trim() ? `mailto:${email.trim()}` : null
+          }
+          candidateName={displayName}
+          retrying={retrying && !email?.trim() && inFlight}
+          onRetry={onRetry}
+        />
       </dl>
 
       {progressLabel ? (

@@ -29,6 +29,12 @@ export function normalizeText(raw: string): string {
   return raw
     .replace(/\r\n?/g, "\n")
     .replace(/\t/g, " ")
+    // Keep phone/email token boundaries (digit→letter) without letter→digit splits
+    .replace(/(\d)([A-Za-z])/g, "$1 $2")
+    .replace(
+      /(\.(?:com|net|org|edu|gov|info|biz|me|tv|app|dev|ai|tech|io|co\.uk|uk|us|ca|au|co))(?=[A-Z])/g,
+      "$1 "
+    )
     .replace(/[ \u00a0]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .split("\n")

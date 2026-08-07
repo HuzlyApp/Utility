@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Card, CardBody } from "@/components/ui/primitives";
+import { Button, Card, CardBody } from "@/components/ui/primitives";
 import { candidateRoutes } from "@/lib/routes";
 import { DISPLAY_CATEGORY, type MatchCategory } from "@/lib/types";
 import type { DashboardCandidateRow } from "@/lib/dal/candidates";
@@ -15,11 +15,9 @@ import { displayCandidateName } from "@/lib/resume-name";
 import {
   CONTACT_EXTRACTION_POLL_MAX_MS,
   CONTACT_EXTRACTION_POLL_MS,
-  canRetryContactExtraction,
-  displayContactValue,
+  getContactFieldUiState,
   isContactExtractionInFlight,
-  isContactExtractionStale,
-  normalizeContactExtractionStatus,
+  needsContactExtractionRetry,
 } from "@/lib/contact-extract";
 
 function scoreTone(score: number | null): string {
@@ -34,88 +32,101 @@ function ContactField({
   value,
   status,
   startedAt,
+  attempts,
   canViewContact,
   nowrap,
+  href,
+  field,
+  candidateName,
+  retrying,
+  onRetry,
 }: {
   value: string | null | undefined;
   status: string | null | undefined;
   startedAt?: string | null;
+  attempts?: number | null;
   canViewContact: boolean;
   nowrap?: boolean;
+  href?: string | null;
+  field: "email" | "phone";
+  candidateName: string;
+  retrying?: boolean;
+  onRetry?: () => void;
 }) {
-  const display = displayContactValue({
+  const ui = getContactFieldUiState({
     value,
     extractionStatus: status,
     canViewContact,
     startedAt,
+    attempts,
+    field,
   });
-  const inFlight = isContactExtractionInFlight(status, startedAt);
-  return (
-    <span
-      className={
-        nowrap
-          ? "inline-flex items-center gap-1 whitespace-nowrap"
-          : "inline-flex items-center gap-1 break-all"
-      }
-    >
-      {inFlight && !value?.trim() ? (
+
+  if (ui.kind === "value") {
+    const content = (
+      <span className={nowrap ? "whitespace-nowrap" : "break-all"}>{ui.label}</span>
+    );
+    if (href && !ui.label.startsWith("Invalid")) {
+      return (
+        <a href={href} className="text-brand-700 hover:underline">
+          {content}
+        </a>
+      );
+    }
+    return content;
+  }
+
+  if (ui.kind === "extracting" || retrying) {
+    return (
+      <span
+        className={
+          nowrap
+            ? "inline-flex items-center gap-1 whitespace-nowrap text-slate-600"
+            : "inline-flex items-center gap-1 break-all text-slate-600"
+        }
+      >
         <span
           className="inline-block h-2.5 w-2.5 animate-spin rounded-full border border-slate-300 border-t-brand-600"
           aria-hidden
         />
-      ) : null}
-      {display}
-    </span>
-  );
-}
+        {retrying ? "Extracting…" : ui.label}
+      </span>
+    );
+  }
 
-function ExtractionFailure({
-  row,
-  retrying,
-  onRetry,
-}: {
-  row: DashboardCandidateRow;
-  retrying: boolean;
-  onRetry: () => void;
-}) {
-  const stale = isContactExtractionStale(
-    row.contact_extraction_status,
-    row.contact_extraction_started_at
-  );
-  const canRetry = canRetryContactExtraction({
-    status: row.contact_extraction_status,
-    attempts: row.contact_extraction_attempts,
-    startedAt: row.contact_extraction_started_at,
-  });
-  return (
-    <div className="space-y-1 text-[12px] leading-[1.3]">
-      {(row.phone?.trim() || row.email?.trim()) && (
-        <>
-          <p className="whitespace-nowrap text-slate-600">
-            {displayOrDash(row.phone)}
-          </p>
-          <p className="break-all text-slate-600">{displayOrDash(row.email)}</p>
-        </>
-      )}
-      <p className="text-slate-600">
-        {stale ? "Extraction did not complete" : "Extraction failed"}
-      </p>
-      {canRetry ? (
-        <button
-          type="button"
-          className="font-medium text-brand-700 hover:underline disabled:opacity-60"
-          disabled={retrying}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onRetry();
-          }}
-        >
-          {retrying ? "Retrying…" : "Retry"}
-        </button>
-      ) : null}
-    </div>
-  );
+  if (ui.kind === "retryable") {
+    return (
+      <span
+        className={
+          nowrap
+            ? "inline-flex flex-wrap items-center gap-x-1 whitespace-nowrap text-slate-600"
+            : "inline-flex flex-wrap items-center gap-x-1 break-all text-slate-600"
+        }
+      >
+        <span>{ui.label}</span>
+        <span aria-hidden>·</span>
+        {ui.canRetry && onRetry ? (
+          <button
+            type="button"
+            className="cursor-pointer font-medium text-brand-700 hover:text-brand-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-1 rounded-sm disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={retrying}
+            aria-label={`Retry contact extraction for ${candidateName}`}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onRetry();
+            }}
+          >
+            Retry
+          </button>
+        ) : (
+          <span className="text-slate-500">Retry</span>
+        )}
+      </span>
+    );
+  }
+
+  return <span className="text-slate-500">{ui.label}</span>;
 }
 
 function CandidateEmptyState({
@@ -157,15 +168,6 @@ function CandidateEmptyState({
   );
 }
 
-function needsExtractionUi(row: DashboardCandidateRow): boolean {
-  const status = normalizeContactExtractionStatus(row.contact_extraction_status);
-  const stale = isContactExtractionStale(
-    status,
-    row.contact_extraction_started_at
-  );
-  return status === "failed" || stale;
-}
-
 export function CandidateList({
   items: initialItems,
   statuses,
@@ -185,15 +187,25 @@ export function CandidateList({
   const searchParams = useSearchParams();
   const [rows, setRows] = useState(initialItems);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [bulkRetrying, setBulkRetrying] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState<string | null>(null);
   const kickoffKeyRef = useRef<string | null>(null);
   const pollStartedRef = useRef<number | null>(null);
   const pollGenRef = useRef(0);
+  const retryInFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setRows(initialItems);
   }, [initialItems]);
 
   const queryString = searchParams.toString();
+  const returnTo = queryString ? `/candidates?${queryString}` : "/candidates";
+
+  const candidateHref = useCallback(
+    (candidateId: string, workspaceId?: string | null) =>
+      candidateRoutes.detail(candidateId, workspaceId, returnTo),
+    [returnTo]
+  );
 
   const refreshList = useCallback(async () => {
     const gen = pollGenRef.current;
@@ -269,17 +281,123 @@ export function CandidateList({
     return () => window.clearInterval(pollId);
   }, [hasExtracting, refreshList]);
 
+  const failedRetryCount = useMemo(
+    () =>
+      rows.filter((r) =>
+        needsContactExtractionRetry({
+          email: r.email,
+          phone: r.phone,
+          status: r.contact_extraction_status,
+          attempts: r.contact_extraction_attempts,
+          startedAt: r.contact_extraction_started_at,
+        })
+      ).length,
+    [rows]
+  );
+
   async function retryExtraction(candidateId: string) {
+    if (retryInFlightRef.current.has(candidateId)) return;
+    retryInFlightRef.current.add(candidateId);
     setRetryingId(candidateId);
+    // Optimistic: show Extracting… immediately for this row.
+    setRows((prev) =>
+      prev.map((r) =>
+        r.candidate_id === candidateId
+          ? {
+              ...r,
+              contact_extraction_status: "processing",
+              contact_extraction_started_at: new Date().toISOString(),
+              contact_extraction_error: null,
+            }
+          : r
+      )
+    );
     try {
-      const res = await fetch(`/api/candidates/${candidateId}/reextract-contact`, {
+      const res = await fetch(
+        `/api/candidates/${candidateId}/contact-extraction/retry`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force: false }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setRows((prev) =>
+          prev.map((r) =>
+            r.candidate_id === candidateId
+              ? {
+                  ...r,
+                  email: data.email ?? r.email,
+                  phone: data.phone ?? data.phone_number ?? r.phone,
+                  contact_extraction_status:
+                    data.status ??
+                    data.contact_extraction?.status ??
+                    r.contact_extraction_status,
+                  contact_extraction_attempts:
+                    data.attempts ??
+                    data.attempt ??
+                    r.contact_extraction_attempts,
+                  contact_extraction_error: data.error ?? null,
+                  contact_extraction_started_at: new Date().toISOString(),
+                }
+              : r
+          )
+        );
+        // Keep polling if still in-flight.
+        if (
+          data.status === "queued" ||
+          data.status === "processing" ||
+          data.contact_extraction?.status === "queued" ||
+          data.contact_extraction?.status === "processing"
+        ) {
+          await refreshList();
+        }
+      } else {
+        await refreshList();
+      }
+    } finally {
+      retryInFlightRef.current.delete(candidateId);
+      setRetryingId(null);
+    }
+  }
+
+  async function bulkRetryFailed() {
+    if (bulkRetrying) return;
+    setBulkRetrying(true);
+    setBulkMessage(null);
+    try {
+      const failedIds = rows
+        .filter((r) =>
+          needsContactExtractionRetry({
+            email: r.email,
+            phone: r.phone,
+            status: r.contact_extraction_status,
+            attempts: r.contact_extraction_attempts,
+            startedAt: r.contact_extraction_started_at,
+          })
+        )
+        .map((r) => r.candidate_id);
+      const res = await fetch("/api/candidates/contact-extraction/retry-failed", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ force: false }),
+        body: JSON.stringify({
+          candidateIds: failedIds,
+          limit: Math.min(Math.max(failedIds.length || 25, 10), 40),
+        }),
       });
-      if (res.ok) await refreshList();
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setBulkMessage(
+          data.message ??
+            `Retrying contact extraction for ${data.queued ?? 0} candidates…`
+        );
+        await refreshList();
+      } else {
+        setBulkMessage(data.error ?? "Bulk retry failed.");
+      }
     } finally {
-      setRetryingId(null);
+      setBulkRetrying(false);
     }
   }
 
@@ -295,13 +413,28 @@ export function CandidateList({
 
   return (
     <>
+      {canViewContact && failedRetryCount > 0 ? (
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={bulkRetrying}
+            onClick={() => void bulkRetryFailed()}
+          >
+            {bulkRetrying
+              ? "Retrying…"
+              : `Retry failed contact extraction (${failedRetryCount})`}
+          </Button>
+          {bulkMessage ? (
+            <p className="text-xs text-slate-500">{bulkMessage}</p>
+          ) : null}
+        </div>
+      ) : null}
       <ul className="space-y-3 md:hidden">
         {rows.map((row) => {
-          const href = candidateRoutes.detail(
-            row.candidate_id,
-            row.workspace_id
-          );
-          const showFailure = canViewContact && needsExtractionUi(row);
+          const href = candidateHref(row.candidate_id, row.workspace_id);
+          const name = displayCandidateName(row.full_name);
+          const retrying = retryingId === row.candidate_id;
           return (
             <li
               key={`${row.candidate_id}-${row.workspace_id ?? "none"}`}
@@ -311,9 +444,10 @@ export function CandidateList({
                 <div className="min-w-0">
                   <Link
                     href={href}
-                    className="text-[14px] font-semibold leading-[1.35] text-slate-900 hover:text-brand-700"
+                    aria-label={`View ${name} candidate details`}
+                    className="text-[14px] font-medium leading-[1.35] text-brand-700 hover:text-brand-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-1 rounded-sm"
                   >
-                    {displayCandidateName(row.full_name)}
+                    {name}
                   </Link>
                   <p className="mt-0.5 text-[12px] leading-[1.3] text-slate-500">
                     {[row.specialty, row.location].filter(Boolean).join(" · ") ||
@@ -344,45 +478,55 @@ export function CandidateList({
                   </dd>
                 </div>
                 {canViewContact ? (
-                  showFailure ? (
-                    <div className="col-span-2">
-                      <ExtractionFailure
-                        row={row}
-                        retrying={retryingId === row.candidate_id}
-                        onRetry={() => void retryExtraction(row.candidate_id)}
-                      />
+                  <>
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-slate-400">
+                        Phone
+                      </dt>
+                      <dd>
+                        <ContactField
+                          value={row.phone}
+                          status={row.contact_extraction_status}
+                          startedAt={row.contact_extraction_started_at}
+                          attempts={row.contact_extraction_attempts}
+                          canViewContact={canViewContact}
+                          nowrap
+                          field="phone"
+                          candidateName={name}
+                          retrying={retrying}
+                          onRetry={() => void retryExtraction(row.candidate_id)}
+                          href={
+                            row.phone?.trim()
+                              ? `tel:${row.phone.replace(/[^\d+]/g, "")}`
+                              : null
+                          }
+                        />
+                      </dd>
                     </div>
-                  ) : (
-                    <>
-                      <div>
-                        <dt className="text-[11px] uppercase tracking-wide text-slate-400">
-                          Phone
-                        </dt>
-                        <dd>
-                          <ContactField
-                            value={row.phone}
-                            status={row.contact_extraction_status}
-                            startedAt={row.contact_extraction_started_at}
-                            canViewContact={canViewContact}
-                            nowrap
-                          />
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-[11px] uppercase tracking-wide text-slate-400">
-                          Email
-                        </dt>
-                        <dd>
-                          <ContactField
-                            value={row.email}
-                            status={row.contact_extraction_status}
-                            startedAt={row.contact_extraction_started_at}
-                            canViewContact={canViewContact}
-                          />
-                        </dd>
-                      </div>
-                    </>
-                  )
+                    <div>
+                      <dt className="text-[11px] uppercase tracking-wide text-slate-400">
+                        Email
+                      </dt>
+                      <dd>
+                        <ContactField
+                          value={row.email}
+                          status={row.contact_extraction_status}
+                          startedAt={row.contact_extraction_started_at}
+                          attempts={row.contact_extraction_attempts}
+                          canViewContact={canViewContact}
+                          field="email"
+                          candidateName={name}
+                          retrying={retrying}
+                          onRetry={() => void retryExtraction(row.candidate_id)}
+                          href={
+                            row.email?.trim()
+                              ? `mailto:${row.email.trim()}`
+                              : null
+                          }
+                        />
+                      </dd>
+                    </div>
+                  </>
                 ) : null}
               </dl>
               <div className="mt-3" onClick={(e) => e.stopPropagation()}>
@@ -444,7 +588,8 @@ export function CandidateList({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {rows.map((row) => {
-                  const showFailure = canViewContact && needsExtractionUi(row);
+                  const name = displayCandidateName(row.full_name);
+                  const retrying = retryingId === row.candidate_id;
                   return (
                     <tr
                       key={`${row.candidate_id}-${row.workspace_id ?? "none"}`}
@@ -452,13 +597,14 @@ export function CandidateList({
                     >
                       <td className="sticky left-0 z-10 bg-white px-3 py-2.5 hover:bg-slate-50/80">
                         <Link
-                          href={candidateRoutes.detail(
+                          href={candidateHref(
                             row.candidate_id,
                             row.workspace_id
                           )}
-                          className="line-clamp-2 font-semibold text-slate-800 hover:text-brand-700"
+                          aria-label={`View ${name} candidate details`}
+                          className="line-clamp-2 font-medium text-brand-700 hover:text-brand-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-1 rounded-sm"
                         >
-                          {displayCandidateName(row.full_name)}
+                          {name}
                         </Link>
                         <p className="mt-0.5 text-[12px] leading-[1.3] text-slate-400">
                           {[row.specialty, row.location]
@@ -470,41 +616,55 @@ export function CandidateList({
                         {displayOrDash(row.job_code)}
                       </td>
                       {canViewContact ? (
-                        showFailure ? (
+                        <>
                           <td
-                            className="px-3 py-2.5"
-                            colSpan={2}
+                            className="px-3 py-2.5 text-slate-600"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <ExtractionFailure
-                              row={row}
-                              retrying={retryingId === row.candidate_id}
+                            <ContactField
+                              value={row.phone}
+                              status={row.contact_extraction_status}
+                              startedAt={row.contact_extraction_started_at}
+                              attempts={row.contact_extraction_attempts}
+                              canViewContact={canViewContact}
+                              nowrap
+                              field="phone"
+                              candidateName={name}
+                              retrying={retrying}
                               onRetry={() =>
                                 void retryExtraction(row.candidate_id)
                               }
+                              href={
+                                row.phone?.trim()
+                                  ? `tel:${row.phone.replace(/[^\d+]/g, "")}`
+                                  : null
+                              }
                             />
                           </td>
-                        ) : (
-                          <>
-                            <td className="px-3 py-2.5 text-slate-600">
-                              <ContactField
-                                value={row.phone}
-                                status={row.contact_extraction_status}
-                                startedAt={row.contact_extraction_started_at}
-                                canViewContact={canViewContact}
-                                nowrap
-                              />
-                            </td>
-                            <td className="px-3 py-2.5 text-slate-600">
-                              <ContactField
-                                value={row.email}
-                                status={row.contact_extraction_status}
-                                startedAt={row.contact_extraction_started_at}
-                                canViewContact={canViewContact}
-                              />
-                            </td>
-                          </>
-                        )
+                          <td
+                            className="px-3 py-2.5 text-slate-600"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <ContactField
+                              value={row.email}
+                              status={row.contact_extraction_status}
+                              startedAt={row.contact_extraction_started_at}
+                              attempts={row.contact_extraction_attempts}
+                              canViewContact={canViewContact}
+                              field="email"
+                              candidateName={name}
+                              retrying={retrying}
+                              onRetry={() =>
+                                void retryExtraction(row.candidate_id)
+                              }
+                              href={
+                                row.email?.trim()
+                                  ? `mailto:${row.email.trim()}`
+                                  : null
+                              }
+                            />
+                          </td>
+                        </>
                       ) : null}
                       <td className="px-3 py-2.5 text-slate-600">
                         <span className="line-clamp-3">

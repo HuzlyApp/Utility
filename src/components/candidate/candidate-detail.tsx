@@ -267,11 +267,14 @@ export function CandidateDetail({
   async function reextractContact() {
     setReextracting(true);
     try {
-      const res = await fetch(`/api/candidates/${candidate.id}/reextract-contact`, {
+      const res = await fetch(
+        `/api/candidates/${candidate.id}/contact-extraction/retry`,
+        {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ force: false }),
-      });
+        }
+      );
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.error ?? "Re-extraction failed.");

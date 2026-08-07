@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { ok, fail } from "@/lib/http";
+import { ok } from "@/lib/http";
 import { withTenantUser } from "@/lib/api-helpers";
 import { listDashboardCandidates } from "@/lib/dal/candidates";
 import {
@@ -8,6 +8,7 @@ import {
 } from "@/lib/routes";
 import { canViewCandidateContact } from "@/lib/auth/rbac";
 import { normalizeSearchQuery } from "@/lib/candidate-crm";
+import { buildContactExtractionApiSummary } from "@/lib/contact-extract";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,7 +47,18 @@ export async function GET(req: NextRequest) {
     });
 
     return ok({
-      candidates,
+      candidates: candidates.map((row) => ({
+        ...row,
+        id: row.candidate_id,
+        name: row.full_name,
+        phone_number: row.phone,
+        contact_extraction: buildContactExtractionApiSummary({
+          status: row.contact_extraction_status,
+          attempts: row.contact_extraction_attempts,
+          startedAt: row.contact_extraction_started_at,
+          completedAt: row.contact_extraction_completed_at,
+        }),
+      })),
       total: candidates.length,
       can_view_contact: canViewContact,
     });

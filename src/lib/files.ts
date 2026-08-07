@@ -247,6 +247,23 @@ export async function extractFromUpload(
   const result = await extractText(buffer, filename);
   const method: ExtractionMethod =
     ext === "pdf" ? "TEXT_LAYER" : ext === "txt" ? "PLAINTEXT" : "DOCX";
+
+  // Scanned PDFs often have an empty text layer — do not silently succeed with empty text.
+  if (ext === "pdf" && (!result.success || !result.text.trim())) {
+    return {
+      text: "",
+      method,
+      quality: "FAILED",
+      ocrConfidence: null,
+      isImage: false,
+      needsReview: true,
+      warnings: [
+        result.error ??
+          "We could not extract readable text from this PDF. It may be scanned or image-only. Upload a text PDF, DOCX, or image for OCR.",
+      ],
+    };
+  }
+
   return {
     text: result.text,
     method,

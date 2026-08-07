@@ -10,10 +10,18 @@ import { mapStatusNameToActivityType, sourceFromRole } from "@/lib/recruiter-act
 import { buildStatusChangeMetadata, toCandidateSearchPattern, toPhoneDigitsSearchPattern } from "@/lib/candidate-crm";
 import { canViewCandidateContact } from "@/lib/auth/rbac";
 import {
+  canAutoRetryContactExtraction,
   canOverwriteContactWithResume,
+  classifyContactExtractionFailure,
   extractContactsFromResumeText,
   getSafeContactExtractionError,
+  hasCompleteContactDetails,
   hasContactDetails,
+  isCorruptEmailValue,
+  isCorruptPhoneValue,
+  logContactExtractionEvent,
+  normalizeContactExtractionStatus,
+  resolveTerminalContactStatus,
   CONTACT_EXTRACTION_MAX_ATTEMPTS,
   CONTACT_EXTRACTION_STALE_MS,
   type ContactExtractionStatus,
@@ -24,6 +32,8 @@ import type {
   CandidatePipelineStatus,
   RankedCandidateRow,
 } from "./types";
+import { extractFromUpload } from "@/lib/files";
+import { getCandidateResumeFilesWithBytes } from "@/lib/dal/fileStore";
 
 export interface CandidateInput {
   full_name?: string;
@@ -71,7 +81,7 @@ export async function createCandidate(
       ${input.extraction_quality ?? null}, ${input.recruiter_notes ?? null},
       ${JSON.stringify(input.verified_information ?? {})}, ${user.id}, ${user.id}, ${user.id},
       ${defaultStatusId}, ${user.id},
-      ${"pending"}, ${0}
+      ${"not_started"}, ${0}
     ) RETURNING id
   `) as { id: string }[];
   const id = rows[0].id;
@@ -149,6 +159,18 @@ export async function updateCandidate(
     }
   }
 
+  const nextResumeText =
+    input.extracted_resume_text !== undefined
+      ? input.extracted_resume_text
+      : existing.extracted_resume_text;
+  const resumeTextChanged =
+    input.extracted_resume_text !== undefined &&
+    (input.extracted_resume_text ?? "").trim() !==
+      (existing.extracted_resume_text ?? "").trim();
+  const nextResumeVersion = resumeTextChanged
+    ? Number(existing.contact_extraction_resume_version ?? existing.resume_version ?? 0) + 1
+    : Number(existing.contact_extraction_resume_version ?? existing.resume_version ?? 0);
+
   await sql`
     UPDATE candidates SET
       full_name = ${nextName},
@@ -161,13 +183,23 @@ export async function updateCandidate(
       phone_source = ${phoneSource},
       specialty = ${input.specialty ?? existing.specialty},
       location = ${input.location ?? existing.location},
-      extracted_resume_text = ${input.extracted_resume_text ?? existing.extracted_resume_text},
+      extracted_resume_text = ${nextResumeText},
       ocr_confidence = ${input.ocr_confidence ?? existing.ocr_confidence},
       extraction_quality = ${input.extraction_quality ?? existing.extraction_quality},
       recruiter_notes = ${input.recruiter_notes ?? existing.recruiter_notes},
       verified_information = ${JSON.stringify(
         input.verified_information ?? existing.verified_information
       )},
+      contact_extraction_resume_version = ${nextResumeVersion},
+      contact_extraction_status = ${
+        resumeTextChanged ? "not_started" : existing.contact_extraction_status ?? "not_started"
+      },
+      contact_extraction_error = ${
+        resumeTextChanged ? null : existing.contact_extraction_error ?? null
+      },
+      contact_extraction_attempts = ${
+        resumeTextChanged ? 0 : Number(existing.contact_extraction_attempts ?? 0)
+      },
       updated_by_user_id = ${user.id},
       updated_at = now()
     WHERE id = ${id} AND tenant_id = ${tenantId}
@@ -184,7 +216,7 @@ export async function updateCandidate(
 
 /**
  * Parse résumé text and persist phone/email unless manually corrected.
- * Always ends in a terminal status (completed | not_found | failed).
+ * Always ends in a terminal status (completed | not_found | failed | stale handled elsewhere).
  */
 export async function applyResumeContactExtraction(
   user: AppUser,
@@ -194,6 +226,9 @@ export async function applyResumeContactExtraction(
     force?: boolean;
     workspaceId?: string | null;
     fileType?: string | null;
+    /** When true, do not count against / increment attempt budget (claim-only path). */
+    manualRetry?: boolean;
+    resumeVersion?: number | null;
   }
 ): Promise<{
   status: ContactExtractionStatus;
@@ -210,14 +245,53 @@ export async function applyResumeContactExtraction(
   const tenantId = tenantIdOf(user);
   const force = opts?.force ?? false;
   const priorAttempts = Number(existing.contact_extraction_attempts ?? 0);
+  const resumeVersion = Number(
+    opts?.resumeVersion ??
+      existing.contact_extraction_resume_version ??
+      existing.resume_version ??
+      0
+  );
+  const startedAt = Date.now();
+
+  // Idempotency: skip if this resume version was already extracted successfully.
+  const priorStatus = normalizeContactExtractionStatus(
+    existing.contact_extraction_status
+  );
+  const priorVersion = Number(
+    existing.contact_extraction_resume_version ?? existing.resume_version ?? 0
+  );
+  if (
+    !force &&
+    !opts?.manualRetry &&
+    priorVersion === resumeVersion &&
+    (priorStatus === "completed" || priorStatus === "not_found") &&
+    Number(existing.contact_extraction_extracted_resume_version ?? -1) ===
+      resumeVersion
+  ) {
+    logContactExtractionEvent("skip_idempotent", {
+      candidate_id: candidateId,
+      tenant_id: tenantId,
+      resume_version: resumeVersion,
+      status: priorStatus,
+    });
+    return {
+      status: priorStatus,
+      email: existing.email,
+      phone: existing.phone,
+      attempts: priorAttempts,
+      error: null,
+    };
+  }
+
   const attempts = priorAttempts + 1;
 
-  if (!force && attempts > CONTACT_EXTRACTION_MAX_ATTEMPTS) {
+  if (!force && !opts?.manualRetry && attempts > CONTACT_EXTRACTION_MAX_ATTEMPTS) {
     const error = "Maximum contact extraction attempts reached.";
     await sql`
       UPDATE candidates SET
         contact_extraction_status = ${"failed"},
         contact_extraction_error = ${error},
+        contact_extraction_error_category = ${"max_attempts"},
         contact_extraction_completed_at = now(),
         contact_extracted_at = now(),
         updated_at = now()
@@ -232,11 +306,14 @@ export async function applyResumeContactExtraction(
     };
   }
 
-  console.info("[contact-extract] start", {
-    candidateId,
-    workspaceId: opts?.workspaceId ?? null,
-    attempt: attempts,
-    fileType: opts?.fileType ?? null,
+  logContactExtractionEvent("start", {
+    candidate_id: candidateId,
+    tenant_id: tenantId,
+    workspace_id: opts?.workspaceId ?? null,
+    attempt_number: attempts,
+    file_type: opts?.fileType ?? null,
+    resume_version: resumeVersion,
+    parser_used: "regex_resume_text",
   });
 
   await sql`
@@ -244,13 +321,80 @@ export async function applyResumeContactExtraction(
       contact_extraction_status = ${"processing"},
       contact_extraction_started_at = now(),
       contact_extraction_error = ${null},
+      contact_extraction_error_category = ${null},
       contact_extraction_attempts = ${attempts},
+      contact_extraction_resume_version = ${resumeVersion},
       updated_at = now()
     WHERE id = ${candidateId} AND tenant_id = ${tenantId}
   `;
 
   try {
-    const extracted = extractContactsFromResumeText(resumeText);
+    const trimmed = (resumeText ?? "").trim();
+    if (!trimmed) {
+      // Prefer healing to completed when contacts already exist — never leave a
+      // false "Failed" banner over valid email/phone.
+      if (hasContactDetails(existing)) {
+        await sql`
+          UPDATE candidates SET
+            contact_extraction_status = ${"completed"},
+            contact_extraction_error = ${null},
+            contact_extraction_error_category = ${null},
+            contact_extraction_completed_at = now(),
+            contact_extracted_at = COALESCE(contact_extracted_at, now()),
+            contact_extraction_extracted_resume_version = ${resumeVersion},
+            updated_at = now()
+          WHERE id = ${candidateId} AND tenant_id = ${tenantId}
+        `;
+        logContactExtractionEvent("healed_completed", {
+          candidate_id: candidateId,
+          tenant_id: tenantId,
+          attempt_number: attempts,
+          resume_version: resumeVersion,
+          result_status: "completed",
+          failure_category: "empty_text",
+          duration_ms: Date.now() - startedAt,
+        });
+        return {
+          status: "completed",
+          email: existing.email,
+          phone: existing.phone,
+          attempts,
+          error: null,
+        };
+      }
+      const category = "empty_text";
+      const error = "No résumé text available for contact extraction.";
+      await sql`
+        UPDATE candidates SET
+          contact_extraction_status = ${"failed"},
+          contact_extraction_error = ${error},
+          contact_extraction_error_category = ${category},
+          contact_extraction_completed_at = now(),
+          contact_extracted_at = now(),
+          contact_extraction_extracted_resume_version = ${resumeVersion},
+          updated_at = now()
+        WHERE id = ${candidateId} AND tenant_id = ${tenantId}
+      `;
+      logContactExtractionEvent("failed", {
+        candidate_id: candidateId,
+        tenant_id: tenantId,
+        attempt_number: attempts,
+        resume_version: resumeVersion,
+        file_type: opts?.fileType ?? null,
+        result_status: "failed",
+        failure_category: category,
+        duration_ms: Date.now() - startedAt,
+      });
+      return {
+        status: "failed",
+        email: existing.email,
+        phone: existing.phone,
+        attempts,
+        error,
+      };
+    }
+
+    const extracted = extractContactsFromResumeText(trimmed);
     const allowEmail = canOverwriteContactWithResume(
       existing.email_source as ContactSource | null,
       force
@@ -261,28 +405,32 @@ export async function applyResumeContactExtraction(
     );
 
     const nextEmail = allowEmail
-      ? extracted.email ?? (force ? null : existing.email)
+      ? extracted.email ??
+        (force || isCorruptEmailValue(existing.email) ? null : existing.email)
       : existing.email;
     const nextPhone = allowPhone
-      ? extracted.phone ?? (force ? null : existing.phone)
+      ? extracted.phone ??
+        (force || isCorruptPhoneValue(existing.phone) ? null : existing.phone)
       : existing.phone;
     const nextEmailSource = allowEmail
       ? extracted.email
         ? "RESUME"
-        : existing.email_source ?? null
+        : isCorruptEmailValue(existing.email)
+          ? null
+          : existing.email_source ?? null
       : existing.email_source ?? null;
     const nextPhoneSource = allowPhone
       ? extracted.phone
         ? "RESUME"
-        : existing.phone_source ?? null
+        : isCorruptPhoneValue(existing.phone)
+          ? null
+          : existing.phone_source ?? null
       : existing.phone_source ?? null;
 
-    const status: ContactExtractionStatus = hasContactDetails({
+    const status: ContactExtractionStatus = resolveTerminalContactStatus({
       email: nextEmail,
       phone: nextPhone,
-    })
-      ? "completed"
-      : "not_found";
+    });
 
     await sql`
       UPDATE candidates SET
@@ -294,20 +442,27 @@ export async function applyResumeContactExtraction(
         phone_source = ${nextPhoneSource},
         contact_extraction_status = ${status},
         contact_extraction_error = ${null},
+        contact_extraction_error_category = ${null},
         contact_extraction_completed_at = now(),
         contact_extracted_at = now(),
+        contact_extraction_extracted_resume_version = ${resumeVersion},
         updated_by_user_id = ${user.id},
         updated_at = now()
       WHERE id = ${candidateId} AND tenant_id = ${tenantId}
     `;
 
-    console.info("[contact-extract] done", {
-      candidateId,
-      workspaceId: opts?.workspaceId ?? null,
-      attempt: attempts,
-      status,
-      hasEmail: Boolean(nextEmail),
-      hasPhone: Boolean(nextPhone),
+    logContactExtractionEvent("done", {
+      candidate_id: candidateId,
+      tenant_id: tenantId,
+      workspace_id: opts?.workspaceId ?? null,
+      attempt_number: attempts,
+      resume_version: resumeVersion,
+      file_type: opts?.fileType ?? null,
+      parser_used: "regex_resume_text",
+      result_status: status,
+      has_email: Boolean(nextEmail),
+      has_phone: Boolean(nextPhone),
+      duration_ms: Date.now() - startedAt,
     });
 
     return {
@@ -319,20 +474,40 @@ export async function applyResumeContactExtraction(
     };
   } catch (error) {
     const safeError = getSafeContactExtractionError(error);
-    await sql`
-      UPDATE candidates SET
-        contact_extraction_status = ${"failed"},
-        contact_extraction_error = ${safeError},
-        contact_extraction_completed_at = now(),
-        contact_extracted_at = now(),
-        updated_at = now()
-      WHERE id = ${candidateId} AND tenant_id = ${tenantId}
-    `;
-    console.info("[contact-extract] failed", {
-      candidateId,
-      workspaceId: opts?.workspaceId ?? null,
-      attempt: attempts,
-      category: "extraction_error",
+    const category = classifyContactExtractionFailure(error, {
+      fileType: opts?.fileType,
+    });
+    try {
+      await sql`
+        UPDATE candidates SET
+          contact_extraction_status = ${"failed"},
+          contact_extraction_error = ${safeError},
+          contact_extraction_error_category = ${category},
+          contact_extraction_completed_at = now(),
+          contact_extracted_at = now(),
+          updated_at = now()
+        WHERE id = ${candidateId} AND tenant_id = ${tenantId}
+      `;
+    } catch {
+      logContactExtractionEvent("failed", {
+        candidate_id: candidateId,
+        tenant_id: tenantId,
+        attempt_number: attempts,
+        failure_category: "database_update_failed",
+        result_status: "failed",
+        duration_ms: Date.now() - startedAt,
+      });
+    }
+    logContactExtractionEvent("failed", {
+      candidate_id: candidateId,
+      tenant_id: tenantId,
+      workspace_id: opts?.workspaceId ?? null,
+      attempt_number: attempts,
+      resume_version: resumeVersion,
+      file_type: opts?.fileType ?? null,
+      result_status: "failed",
+      failure_category: category,
+      duration_ms: Date.now() - startedAt,
     });
     return {
       status: "failed",
@@ -344,7 +519,7 @@ export async function applyResumeContactExtraction(
   }
 }
 
-/** Mark stale pending/processing rows as failed so UI never sticks on Extracting… */
+/** Mark stale queued/processing rows so UI never sticks on Extracting… */
 export async function finalizeStaleContactExtractions(
   user: AppUser,
   candidateIds?: string[]
@@ -355,14 +530,15 @@ export async function finalizeStaleContactExtractions(
   const ids = candidateIds?.filter(Boolean) ?? [];
   const rows = (await sql`
     UPDATE candidates SET
-      contact_extraction_status = ${"failed"},
+      contact_extraction_status = ${"stale"},
       contact_extraction_error = ${"Contact extraction timed out before completion."},
+      contact_extraction_error_category = ${"timeout"},
       contact_extraction_completed_at = now(),
       contact_extracted_at = COALESCE(contact_extracted_at, now()),
       updated_at = now()
     WHERE tenant_id = ${tenantId}
-      AND lower(COALESCE(contact_extraction_status, 'pending')) IN (
-        'pending', 'processing', 'not_processed', 'queued'
+      AND lower(COALESCE(contact_extraction_status, 'not_started')) IN (
+        'pending', 'not_started', 'processing', 'not_processed', 'queued'
       )
       AND contact_extraction_started_at IS NOT NULL
       AND contact_extraction_started_at < ${cutoff}::timestamptz
@@ -373,19 +549,21 @@ export async function finalizeStaleContactExtractions(
     RETURNING id
   `) as Array<{ id: string }>;
   if (rows.length > 0) {
-    console.info("[contact-extract] stale_finalized", {
+    logContactExtractionEvent("stale_finalized", {
+      tenant_id: tenantId,
       count: rows.length,
-      candidateIds: rows.map((r) => r.id),
+      candidate_ids: rows.map((r) => r.id),
+      failure_category: "timeout",
     });
   }
   return rows.length;
 }
 
 /**
- * Resolve legacy/stuck pending rows for a workspace list:
+ * Resolve legacy/stuck not_started rows for a workspace list:
  * - already has contact → completed
  * - has résumé text → extract now (capped)
- * - otherwise → not_found
+ * - otherwise → failed (empty_text)
  */
 export async function resolvePendingContactExtractions(
   user: AppUser,
@@ -400,12 +578,13 @@ export async function resolvePendingContactExtractions(
   const limit = Math.max(1, Math.min(opts?.limit ?? 8, 20));
   const pending = (await sql`
     SELECT id, email, phone, extracted_resume_text, email_source, phone_source,
-           contact_extraction_status, contact_extraction_attempts
+           contact_extraction_status, contact_extraction_attempts,
+           COALESCE(contact_extraction_resume_version, 0) AS contact_extraction_resume_version
     FROM candidates
     WHERE tenant_id = ${tenantId}
       AND id = ANY(${candidateIds}::uuid[])
-      AND lower(COALESCE(contact_extraction_status, 'pending')) IN (
-        'pending', 'not_processed'
+      AND lower(COALESCE(contact_extraction_status, 'not_started')) IN (
+        'pending', 'not_started', 'not_processed'
       )
     LIMIT ${limit}
   `) as Array<{
@@ -417,6 +596,7 @@ export async function resolvePendingContactExtractions(
     phone_source: string | null;
     contact_extraction_status: string | null;
     contact_extraction_attempts: number | null;
+    contact_extraction_resume_version: number | null;
   }>;
 
   for (const row of pending) {
@@ -427,6 +607,7 @@ export async function resolvePendingContactExtractions(
           contact_extraction_completed_at = COALESCE(contact_extraction_completed_at, now()),
           contact_extracted_at = COALESCE(contact_extracted_at, now()),
           contact_extraction_error = ${null},
+          contact_extraction_error_category = ${null},
           updated_at = now()
         WHERE id = ${row.id} AND tenant_id = ${tenantId}
       `;
@@ -436,10 +617,11 @@ export async function resolvePendingContactExtractions(
     if (!resume) {
       await sql`
         UPDATE candidates SET
-          contact_extraction_status = ${"not_found"},
+          contact_extraction_status = ${"failed"},
           contact_extraction_completed_at = now(),
           contact_extracted_at = now(),
-          contact_extraction_error = ${null},
+          contact_extraction_error = ${"No résumé text available for contact extraction."},
+          contact_extraction_error_category = ${"empty_text"},
           updated_at = now()
         WHERE id = ${row.id} AND tenant_id = ${tenantId}
       `;
@@ -447,13 +629,14 @@ export async function resolvePendingContactExtractions(
     }
     await applyResumeContactExtraction(user, row.id, resume, {
       workspaceId: opts?.workspaceId,
+      resumeVersion: Number(row.contact_extraction_resume_version ?? 0),
     });
   }
 }
 
 /**
  * Background contact extraction for the Candidates page / tenant backfill.
- * Claims eligible rows (idempotent: skips in-flight processing), then extracts
+ * Claims eligible rows (idempotent: skips in-flight processing/queued), then extracts
  * from stored résumé text without blocking the list SSR path.
  */
 export async function processEligibleContactExtractions(
@@ -465,17 +648,29 @@ export async function processEligibleContactExtractions(
   }
 ): Promise<{ processed: number; claimedIds: string[] }> {
   await finalizeStaleContactExtractions(user, opts?.candidateIds);
+  await healFalseFailedContactExtractions(user, opts?.candidateIds);
+  await queueCorruptContactRecordsForRepair(user, {
+    limit: opts?.limit ?? 25,
+    candidateIds: opts?.candidateIds,
+  });
 
   const sql = getSql();
   const tenantId = tenantIdOf(user);
   const limit = Math.max(1, Math.min(opts?.limit ?? 25, 100));
   const preferIds = (opts?.candidateIds ?? []).filter(Boolean);
   const cutoff = new Date(Date.now() - CONTACT_EXTRACTION_STALE_MS).toISOString();
+  const recentClaimCutoff = new Date(Date.now() - 15_000).toISOString();
 
   // Prefer visible IDs, then fill remaining with tenant-wide eligible rows.
+  // Atomic claim skips currently processing and recently-queued rows (idempotent).
   const claimed = (await sql`
     WITH eligible AS (
       SELECT c.id, c.extracted_resume_text,
+        COALESCE(c.contact_extraction_resume_version, 0) AS contact_extraction_resume_version,
+        COALESCE(c.contact_extraction_attempts, 0) AS contact_extraction_attempts,
+        c.contact_extraction_status,
+        c.contact_extraction_completed_at,
+        c.contact_extraction_error_category,
         CASE
           WHEN ${preferIds.length > 0}::boolean
            AND c.id = ANY(${preferIds}::uuid[])
@@ -487,27 +682,34 @@ export async function processEligibleContactExtractions(
         AND NULLIF(BTRIM(COALESCE(c.extracted_resume_text, '')), '') IS NOT NULL
         AND COALESCE(c.contact_extraction_attempts, 0) < ${CONTACT_EXTRACTION_MAX_ATTEMPTS}
         AND (
-          lower(COALESCE(c.contact_extraction_status, 'pending')) IN (
-            'pending', 'not_processed', 'queued'
+          lower(COALESCE(c.contact_extraction_status, 'not_started')) IN (
+            'pending', 'not_started', 'not_processed'
           )
           OR (
-            lower(c.contact_extraction_status) = 'failed'
+            lower(c.contact_extraction_status) IN ('failed', 'stale')
             AND COALESCE(c.contact_extraction_attempts, 0) < ${CONTACT_EXTRACTION_MAX_ATTEMPTS}
           )
           OR (
-            lower(c.contact_extraction_status) = 'processing'
+            lower(c.contact_extraction_status) IN ('processing', 'queued')
             AND c.contact_extraction_started_at IS NOT NULL
             AND c.contact_extraction_started_at < ${cutoff}::timestamptz
           )
         )
-        AND lower(COALESCE(c.contact_extraction_status, 'pending')) NOT IN (
+        AND lower(COALESCE(c.contact_extraction_status, 'not_started')) NOT IN (
           'completed', 'not_found', 'extracted'
         )
         AND (
           NULLIF(BTRIM(COALESCE(c.email, '')), '') IS NULL
           OR NULLIF(BTRIM(COALESCE(c.phone, '')), '') IS NULL
-          OR lower(COALESCE(c.contact_extraction_status, 'pending')) IN (
-            'pending', 'not_processed', 'queued', 'failed'
+          OR lower(COALESCE(c.contact_extraction_status, 'not_started')) IN (
+            'pending', 'not_started', 'not_processed', 'failed', 'stale'
+          )
+        )
+        AND (
+          COALESCE(c.contact_extraction_extracted_resume_version, -1) IS DISTINCT FROM
+            COALESCE(c.contact_extraction_resume_version, 0)
+          OR lower(COALESCE(c.contact_extraction_status, 'not_started')) NOT IN (
+            'completed', 'not_found'
           )
         )
       ORDER BY prefer_rank ASC, c.updated_at DESC
@@ -515,37 +717,513 @@ export async function processEligibleContactExtractions(
     )
     UPDATE candidates c SET
       contact_extraction_status = ${"queued"},
+      contact_extraction_started_at = COALESCE(c.contact_extraction_started_at, now()),
       contact_extraction_error = ${null},
       updated_at = now()
     FROM eligible e
     WHERE c.id = e.id
       AND c.tenant_id = ${tenantId}
-      AND lower(COALESCE(c.contact_extraction_status, 'pending')) NOT IN (
-        'processing'
+      AND (
+        lower(COALESCE(c.contact_extraction_status, 'not_started')) NOT IN (
+          'processing', 'queued'
+        )
+        OR (
+          c.contact_extraction_started_at IS NOT NULL
+          AND c.contact_extraction_started_at < ${cutoff}::timestamptz
+        )
       )
-    RETURNING c.id, c.extracted_resume_text
-  `) as Array<{ id: string; extracted_resume_text: string | null }>;
+      AND NOT (
+        lower(COALESCE(c.contact_extraction_status, 'not_started')) = 'queued'
+        AND c.contact_extraction_started_at IS NOT NULL
+        AND c.contact_extraction_started_at >= ${recentClaimCutoff}::timestamptz
+      )
+    RETURNING c.id, c.extracted_resume_text,
+      COALESCE(c.contact_extraction_resume_version, 0) AS contact_extraction_resume_version,
+      COALESCE(c.contact_extraction_attempts, 0) AS contact_extraction_attempts,
+      e.contact_extraction_status AS prior_status,
+      e.contact_extraction_completed_at,
+      e.contact_extraction_error_category
+  `) as Array<{
+    id: string;
+    extracted_resume_text: string | null;
+    contact_extraction_resume_version: number;
+    contact_extraction_attempts: number;
+    prior_status: string | null;
+    contact_extraction_completed_at: string | null;
+    contact_extraction_error_category: string | null;
+  }>;
 
-  const toProcess = claimed;
   const claimedIds: string[] = [];
 
-  for (const row of toProcess) {
+  for (const row of claimed) {
+    // Enforce auto-retry backoff for failed/stale rows.
+    const normalized = normalizeContactExtractionStatus(row.prior_status);
+    if (
+      (normalized === "failed" || normalized === "stale") &&
+      !canAutoRetryContactExtraction({
+        status: normalized,
+        attempts: row.contact_extraction_attempts,
+        completedAt: row.contact_extraction_completed_at,
+        errorCategory: row.contact_extraction_error_category,
+      })
+    ) {
+      // Roll claim back to prior terminal status so another worker can wait.
+      await sql`
+        UPDATE candidates SET
+          contact_extraction_status = ${normalized},
+          updated_at = now()
+        WHERE id = ${row.id} AND tenant_id = ${tenantId}
+          AND lower(contact_extraction_status) = 'queued'
+      `;
+      continue;
+    }
+
     claimedIds.push(row.id);
-    console.info("[contact-extract] background_start", {
-      candidateId: row.id,
+    logContactExtractionEvent("background_start", {
+      candidate_id: row.id,
+      tenant_id: tenantId,
+      resume_version: row.contact_extraction_resume_version,
+      attempt_number: Number(row.contact_extraction_attempts ?? 0) + 1,
     });
     await applyResumeContactExtraction(user, row.id, row.extracted_resume_text, {
       workspaceId: null,
       fileType: "stored-text",
+      resumeVersion: row.contact_extraction_resume_version,
     });
   }
 
-  console.info("[contact-extract] background_batch", {
+  logContactExtractionEvent("background_batch", {
+    tenant_id: tenantId,
     processed: claimedIds.length,
     limit,
   });
 
   return { processed: claimedIds.length, claimedIds };
+}
+
+/**
+ * Heal false-failed rows: when email AND phone already exist, status must be completed.
+ * Also heal failed/stale rows that have at least one contact and no process error worth retrying as "failed UI".
+ */
+export async function healFalseFailedContactExtractions(
+  user: AppUser,
+  candidateIds?: string[]
+): Promise<number> {
+  const sql = getSql();
+  const tenantId = tenantIdOf(user);
+  const ids = candidateIds?.filter(Boolean) ?? [];
+  const rows = (await sql`
+    UPDATE candidates SET
+      contact_extraction_status = ${"completed"},
+      contact_extraction_error = ${null},
+      contact_extraction_error_category = ${null},
+      contact_extraction_completed_at = COALESCE(contact_extraction_completed_at, now()),
+      contact_extracted_at = COALESCE(contact_extracted_at, now()),
+      updated_at = now()
+    WHERE tenant_id = ${tenantId}
+      AND lower(COALESCE(contact_extraction_status, 'not_started')) IN (
+        'failed', 'stale'
+      )
+      AND NULLIF(BTRIM(COALESCE(email, '')), '') IS NOT NULL
+      AND NULLIF(BTRIM(COALESCE(phone, '')), '') IS NOT NULL
+      AND email !~ '\\s'
+      AND email ~ '@'
+      AND email !~* '^[0-9]{7,}[a-z]'
+      AND phone !~ '@'
+      AND phone !~* '[a-z]'
+      AND (
+        ${ids.length === 0}::boolean
+        OR id = ANY(${ids}::uuid[])
+      )
+    RETURNING id
+  `) as Array<{ id: string }>;
+  if (rows.length > 0) {
+    logContactExtractionEvent("healed_false_failed", {
+      tenant_id: tenantId,
+      count: rows.length,
+      candidate_ids: rows.map((r) => r.id),
+    });
+  }
+  return rows.length;
+}
+
+/**
+ * Queue candidates whose persisted email/phone looks corrupted
+ * (phone+email glued, email+city glued, letters in phone, etc.) for re-extraction.
+ */
+export async function queueCorruptContactRecordsForRepair(
+  user: AppUser,
+  opts?: { limit?: number; candidateIds?: string[] }
+): Promise<{ queued: number; claimedIds: string[] }> {
+  const sql = getSql();
+  const tenantId = tenantIdOf(user);
+  const limit = Math.max(1, Math.min(opts?.limit ?? 40, 100));
+  const preferIds = (opts?.candidateIds ?? []).filter(Boolean);
+
+  // Heuristic SQL for obvious corruption; precise validation happens in retry.
+  const claimed = (await sql`
+    WITH eligible AS (
+      SELECT c.id
+      FROM candidates c
+      WHERE c.tenant_id = ${tenantId}
+        AND (
+          ${preferIds.length === 0}::boolean
+          OR c.id = ANY(${preferIds}::uuid[])
+        )
+        AND (
+          (
+            NULLIF(BTRIM(COALESCE(c.email, '')), '') IS NOT NULL
+            AND (
+              c.email ~ '\\s'
+              OR c.email !~ '@'
+              OR length(regexp_replace(c.email, '[^@]', '', 'g')) <> 1
+              OR c.email ~* '^[0-9]{7,}[a-z]'
+              OR c.email ~* '@[a-z0-9.-]+\\.(com|net|org|edu|io)[a-z]{3,}$'
+              OR c.email ~* 'phone\\s*:'
+            )
+          )
+          OR (
+            NULLIF(BTRIM(COALESCE(c.phone, '')), '') IS NOT NULL
+            AND (
+              c.phone ~ '@'
+              OR c.phone ~* '[a-z]'
+              OR c.phone ~ '\\n'
+            )
+          )
+        )
+        AND lower(COALESCE(c.contact_extraction_status, 'not_started')) NOT IN (
+          'queued', 'processing'
+        )
+      ORDER BY c.updated_at DESC
+      LIMIT ${limit}
+    )
+    UPDATE candidates c SET
+      contact_extraction_status = ${"failed"},
+      contact_extraction_error = ${"Persisted contact value failed validation and needs re-extraction."},
+      contact_extraction_error_category = ${"extraction_error"},
+      contact_extraction_completed_at = now(),
+      updated_at = now()
+    FROM eligible e
+    WHERE c.id = e.id AND c.tenant_id = ${tenantId}
+    RETURNING c.id
+  `) as Array<{ id: string }>;
+
+  const claimedIds = claimed.map((r) => r.id);
+  if (claimedIds.length > 0) {
+    logContactExtractionEvent("corrupt_contacts_queued", {
+      tenant_id: tenantId,
+      count: claimedIds.length,
+      candidate_ids: claimedIds,
+    });
+  }
+  return { queued: claimedIds.length, claimedIds };
+}
+
+/**
+ * Manual retry: re-read stored résumé file(s), re-extract text, then re-parse contacts.
+ * Preserves MANUAL / MANUAL_CORRECTED / IMPORTED fields. Idempotent while queued/processing.
+ */
+export async function retryCandidateContactExtraction(
+  user: AppUser,
+  candidateId: string,
+  opts?: { force?: boolean }
+): Promise<{
+  status: ContactExtractionStatus;
+  email: string | null;
+  phone: string | null;
+  attempts: number;
+  error: string | null;
+  deduplicated: boolean;
+  resumeReloaded: boolean;
+  fileType: string | null;
+}> {
+  const existing = await getCandidate(user, candidateId);
+  if (!existing) throw new AuthError("Candidate not found.", 404);
+
+  const sql = getSql();
+  const tenantId = tenantIdOf(user);
+  const force = opts?.force ?? false;
+
+  // Heal first if both contacts already exist.
+  if (hasCompleteContactDetails(existing)) {
+    await healFalseFailedContactExtractions(user, [candidateId]);
+    return {
+      status: "completed",
+      email: existing.email,
+      phone: existing.phone,
+      attempts: Number(existing.contact_extraction_attempts ?? 0),
+      error: null,
+      deduplicated: true,
+      resumeReloaded: false,
+      fileType: null,
+    };
+  }
+
+  // Idempotent claim
+  const claimed = (await sql`
+    UPDATE candidates SET
+      contact_extraction_status = ${"queued"},
+      contact_extraction_started_at = now(),
+      contact_extraction_error = ${null},
+      contact_extraction_error_category = ${null},
+      contact_extraction_attempts = CASE
+        WHEN ${force}::boolean THEN 0
+        ELSE contact_extraction_attempts
+      END,
+      updated_at = now()
+    WHERE id = ${candidateId}
+      AND tenant_id = ${tenantId}
+      AND (
+        lower(COALESCE(contact_extraction_status, 'not_started')) NOT IN (
+          'processing', 'queued'
+        )
+        OR contact_extraction_started_at IS NULL
+        OR contact_extraction_started_at < now() - interval '2 minutes'
+      )
+    RETURNING id, contact_extraction_resume_version, contact_extraction_attempts
+  `) as Array<{
+    id: string;
+    contact_extraction_resume_version: number | null;
+    contact_extraction_attempts: number | null;
+  }>;
+
+  if (claimed.length === 0) {
+    const current = await getCandidate(user, candidateId);
+    return {
+      status: normalizeContactExtractionStatus(current?.contact_extraction_status),
+      email: current?.email ?? null,
+      phone: current?.phone ?? null,
+      attempts: Number(current?.contact_extraction_attempts ?? 0),
+      error: null,
+      deduplicated: true,
+      resumeReloaded: false,
+      fileType: null,
+    };
+  }
+
+  const startedAt = Date.now();
+  let resumeText = (existing.extracted_resume_text ?? "").trim();
+  let fileType: string | null = "stored-text";
+  let resumeReloaded = false;
+  let failureCategory: string | null = null;
+  let resumeId: string | null = null;
+
+  try {
+    const files = await getCandidateResumeFilesWithBytes(user, candidateId);
+    if (files.length === 0 && !resumeText) {
+      failureCategory = "resume_missing";
+      throw new Error("No résumé file or text available for contact extraction.");
+    }
+
+    const textParts: string[] = [];
+    for (const file of files) {
+      resumeId = resumeId ?? file.id;
+      fileType = file.fileType ?? fileType;
+      if (file.bytes && file.bytes.length > 0) {
+        try {
+          const outcome = await extractFromUpload(
+            file.bytes,
+            file.fileName,
+            file.isImage
+          );
+          if (outcome.text.trim()) {
+            textParts.push(outcome.text.trim());
+            resumeReloaded = true;
+            fileType = file.fileType ?? fileType;
+          } else if (file.extractedText?.trim()) {
+            textParts.push(file.extractedText.trim());
+          } else {
+            failureCategory =
+              file.fileType === "pdf"
+                ? "pdf_parser_failed"
+                : file.isImage
+                  ? "ocr_failed"
+                  : file.fileType === "docx" || file.fileType === "doc"
+                    ? "docx_parser_failed"
+                    : "empty_resume_text";
+          }
+        } catch {
+          failureCategory = "resume_download_failed";
+          if (file.extractedText?.trim()) {
+            textParts.push(file.extractedText.trim());
+          }
+        }
+      } else if (file.extractedText?.trim()) {
+        textParts.push(file.extractedText.trim());
+      }
+    }
+
+    if (textParts.length > 0) {
+      resumeText = textParts.join("\n\n").trim();
+    }
+
+    if (!resumeText) {
+      failureCategory = failureCategory ?? "empty_resume_text";
+      throw new Error("Could not extract readable text from the stored résumé.");
+    }
+
+    // Persist refreshed résumé text when reloaded from files (does not bump retry attempts twice).
+    if (resumeReloaded) {
+      const nextVersion =
+        Number(claimed[0].contact_extraction_resume_version ?? 0) + 1;
+      await sql`
+        UPDATE candidates SET
+          extracted_resume_text = ${resumeText},
+          contact_extraction_resume_version = ${nextVersion},
+          updated_at = now()
+        WHERE id = ${candidateId} AND tenant_id = ${tenantId}
+      `;
+    }
+
+    const refreshed = await getCandidate(user, candidateId);
+    const resumeVersion = Number(
+      refreshed?.contact_extraction_resume_version ??
+        claimed[0].contact_extraction_resume_version ??
+        0
+    );
+
+    const result = await applyResumeContactExtraction(
+      user,
+      candidateId,
+      resumeText,
+      {
+        force,
+        manualRetry: true,
+        resumeVersion,
+        fileType,
+      }
+    );
+
+    logContactExtractionEvent("manual_retry_done", {
+      candidate_id: candidateId,
+      tenant_id: tenantId,
+      resume_id: resumeId,
+      resume_version: resumeVersion,
+      retry_attempt: result.attempts,
+      file_type: fileType,
+      parser: resumeReloaded ? "file_reparse+regex" : "stored_text+regex",
+      duration_ms: Date.now() - startedAt,
+      status: result.status,
+      failure_category: result.error ? failureCategory : null,
+      resume_reloaded: resumeReloaded,
+    });
+
+    return {
+      ...result,
+      deduplicated: false,
+      resumeReloaded,
+      fileType,
+    };
+  } catch (error) {
+    const safeError = getSafeContactExtractionError(error);
+    const category =
+      failureCategory ??
+      classifyContactExtractionFailure(error, { fileType });
+    // If contacts already exist, heal instead of leaving Failed.
+    const current = await getCandidate(user, candidateId);
+    if (current && hasCompleteContactDetails(current)) {
+      await healFalseFailedContactExtractions(user, [candidateId]);
+      return {
+        status: "completed",
+        email: current.email,
+        phone: current.phone,
+        attempts: Number(current.contact_extraction_attempts ?? 0),
+        error: null,
+        deduplicated: false,
+        resumeReloaded,
+        fileType,
+      };
+    }
+    await sql`
+      UPDATE candidates SET
+        contact_extraction_status = ${"failed"},
+        contact_extraction_error = ${safeError},
+        contact_extraction_error_category = ${category},
+        contact_extraction_completed_at = now(),
+        updated_at = now()
+      WHERE id = ${candidateId} AND tenant_id = ${tenantId}
+    `;
+    logContactExtractionEvent("manual_retry_failed", {
+      candidate_id: candidateId,
+      tenant_id: tenantId,
+      resume_id: resumeId,
+      file_type: fileType,
+      duration_ms: Date.now() - startedAt,
+      status: "failed",
+      failure_category: category,
+    });
+    return {
+      status: "failed",
+      email: current?.email ?? existing.email,
+      phone: current?.phone ?? existing.phone,
+      attempts: Number(current?.contact_extraction_attempts ?? existing.contact_extraction_attempts ?? 0),
+      error: safeError,
+      deduplicated: false,
+      resumeReloaded,
+      fileType,
+    };
+  }
+}
+
+/** Queue failed/stale candidates for batch retry (idempotent). */
+export async function retryFailedContactExtractionsBatch(
+  user: AppUser,
+  opts?: { limit?: number; candidateIds?: string[] }
+): Promise<{ queued: number; claimedIds: string[] }> {
+  await healFalseFailedContactExtractions(user, opts?.candidateIds);
+  const sql = getSql();
+  const tenantId = tenantIdOf(user);
+  const limit = Math.max(1, Math.min(opts?.limit ?? 25, 50));
+  const preferIds = (opts?.candidateIds ?? []).filter(Boolean);
+
+  const claimed = (await sql`
+    WITH eligible AS (
+      SELECT c.id
+      FROM candidates c
+      WHERE c.tenant_id = ${tenantId}
+        AND lower(COALESCE(c.contact_extraction_status, 'not_started')) IN (
+          'failed', 'stale'
+        )
+        AND (
+          NULLIF(BTRIM(COALESCE(c.email, '')), '') IS NULL
+          OR NULLIF(BTRIM(COALESCE(c.phone, '')), '') IS NULL
+        )
+        AND (
+          NULLIF(BTRIM(COALESCE(c.extracted_resume_text, '')), '') IS NOT NULL
+          OR EXISTS (
+            SELECT 1 FROM entity_files f
+            WHERE f.entity_type = 'candidate' AND f.entity_id = c.id
+          )
+        )
+        AND (
+          ${preferIds.length === 0}::boolean
+          OR c.id = ANY(${preferIds}::uuid[])
+        )
+      ORDER BY c.updated_at DESC
+      LIMIT ${limit}
+    )
+    UPDATE candidates c SET
+      contact_extraction_status = ${"queued"},
+      contact_extraction_started_at = now(),
+      contact_extraction_error = ${null},
+      contact_extraction_error_category = ${null},
+      updated_at = now()
+    FROM eligible e
+    WHERE c.id = e.id
+      AND c.tenant_id = ${tenantId}
+      AND lower(COALESCE(c.contact_extraction_status, 'not_started')) IN (
+        'failed', 'stale'
+      )
+    RETURNING c.id
+  `) as Array<{ id: string }>;
+
+  const claimedIds: string[] = [];
+  for (const row of claimed) {
+    claimedIds.push(row.id);
+    await retryCandidateContactExtraction(user, row.id, { force: false });
+  }
+
+  return { queued: claimedIds.length, claimedIds };
 }
 
 export interface CandidateDetailRow extends Candidate {
@@ -1059,6 +1737,14 @@ export async function listDashboardCandidates(
   user: AppUser,
   opts?: DashboardCandidateFilters
 ): Promise<DashboardCandidateRow[]> {
+  // Heal false "Failed" rows that already have both email and phone.
+  try {
+    await healFalseFailedContactExtractions(user);
+    await queueCorruptContactRecordsForRepair(user, { limit: 25 });
+  } catch {
+    /* listing must not fail on heal */
+  }
+
   const sql = getSql();
   const tenantId = tenantIdOf(user);
   const matchCategory = opts?.matchCategory ?? null;
@@ -1331,7 +2017,7 @@ function redactCandidateContact(
   return rows.map((row) => {
     const base: DashboardCandidateRow = {
       ...row,
-      contact_extraction_status: row.contact_extraction_status ?? "pending",
+      contact_extraction_status: row.contact_extraction_status ?? "not_started",
       contact_extraction_started_at: row.contact_extraction_started_at ?? null,
       contact_extraction_completed_at: row.contact_extraction_completed_at ?? null,
       contact_extraction_error: row.contact_extraction_error ?? null,
@@ -1384,7 +2070,7 @@ export async function listWorkspaceCandidates(
         AND w.tenant_id = ${tenantId}
         AND c.tenant_id = ${tenantId}
         AND lower(COALESCE(c.contact_extraction_status, 'pending')) IN (
-          'pending', 'processing', 'not_processed'
+          'pending', 'not_started', 'processing', 'not_processed', 'queued', 'stale'
         )
     `) as Array<{ id: string }>;
     if (pendingIds.length > 0) {
@@ -1482,7 +2168,7 @@ export async function listWorkspaceCandidates(
       email,
       can_view_contact: canViewContact,
       contact_extraction_status:
-        (r.contact_extraction_status as string) ?? "pending",
+        (r.contact_extraction_status as string) ?? "not_started",
       contact_extraction_started_at:
         (r.contact_extraction_started_at as string) ?? null,
       contact_extraction_completed_at:

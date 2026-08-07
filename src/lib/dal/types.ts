@@ -84,7 +84,12 @@ export interface Candidate {
   contact_extraction_started_at?: string | null;
   contact_extraction_completed_at?: string | null;
   contact_extraction_error?: string | null;
+  contact_extraction_error_category?: string | null;
   contact_extraction_attempts?: number | null;
+  contact_extraction_resume_version?: number | null;
+  contact_extraction_extracted_resume_version?: number | null;
+  /** @deprecated use contact_extraction_resume_version */
+  resume_version?: number | null;
   specialty: string | null;
   location: string | null;
   extracted_resume_text: string | null;
