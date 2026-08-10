@@ -110,7 +110,11 @@ CROSS JOIN (
     ('Candidate selected', '#166534', 110, false),
     ('Candidate Rejected', '#d1d5db', 120, false),
     ('Callback - not available', '#5b21b6', 130, false),
-    ('Rejected After 2nd Interview', '#991b1b', 140, false)
+    ('Rejected After 2nd Interview', '#991b1b', 140, false),
+    ('Submitted for MSP Review', '#0ea5e9', 160, false),
+    ('Approved by MSP', '#059669', 170, false),
+    ('Selected by MSP Client', '#166534', 180, false),
+    ('Rejected at MSP Screening', '#dc2626', 190, false)
 ) AS s(name, color, display_order, is_default)
 WHERE NOT EXISTS (
   SELECT 1 FROM candidate_statuses cs

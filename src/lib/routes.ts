@@ -33,6 +33,8 @@ export const jobRoutes = {
 export const candidateRoutes = {
   list: (filter?: CandidateListFilter) =>
     filter && filter !== "all" ? `/candidates?filter=${filter}` : "/candidates",
+  byStatus: (statusId: string) =>
+    `/candidates?status=${encodeURIComponent(statusId)}`,
   detail: (
     candidateId: string,
     workspaceId?: string | null,
@@ -64,17 +66,67 @@ export const dashboardStatRoutes = {
   totalCandidates: candidateRoutes.list(),
   strongMatches: candidateRoutes.list("strong"),
   needsVerification: candidateRoutes.list("needs-verification"),
-  readyToSubmit: candidateRoutes.list("ready-to-submit"),
 } as const;
+
+/**
+ * Pipeline statuses surfaced as clickable dashboard tiles.
+ * `matchNames` maps display labels to tenant status option names
+ * (including historical naming variants).
+ */
+export const DASHBOARD_STATUS_TILES = [
+  {
+    key: "new-not-contacted",
+    label: "New Not Contacted",
+    matchNames: ["New / Not Contacted", "New Not Contacted"],
+  },
+  {
+    key: "ready-for-2nd-level-interview",
+    label: "Ready for 2nd Level Interview",
+    matchNames: [
+      "Qualified-Ready for 2nd Interview",
+      "Ready for 2nd Level Interview",
+    ],
+  },
+  {
+    key: "approved-upload-to-portal",
+    label: "Approved Upload to Portal",
+    matchNames: ["Approved -Upload to Portal", "Approved Upload to Portal"],
+  },
+  {
+    key: "submitted-for-msp-review",
+    label: "Submitted for MSP Review",
+    matchNames: ["Submitted for MSP Review"],
+  },
+  {
+    key: "approved-by-msp",
+    label: "Approved by MSP",
+    matchNames: ["Approved by MSP"],
+  },
+  {
+    key: "rejected-at-msp-screening",
+    label: "Rejected at MSP Screening",
+    matchNames: ["Rejected at MSP Screening"],
+  },
+  {
+    key: "selected-by-msp-client",
+    label: "Selected by MSP Client",
+    matchNames: ["Selected by MSP Client"],
+  },
+] as const;
+
+export type DashboardStatusTileKey =
+  (typeof DASHBOARD_STATUS_TILES)[number]["key"];
 
 export const CANDIDATE_LIST_FILTERS = [
   "all",
   "strong",
   "needs-verification",
-  "ready-to-submit",
 ] as const;
 
-export type CandidateListFilter = (typeof CANDIDATE_LIST_FILTERS)[number];
+/** Includes legacy URL values so bookmarked links keep working. */
+export type CandidateListFilter =
+  | (typeof CANDIDATE_LIST_FILTERS)[number]
+  | "ready-to-submit";
 
 export const JOB_LIST_STATUSES = ["active", "archived", "all"] as const;
 export type JobListStatus = (typeof JOB_LIST_STATUSES)[number];

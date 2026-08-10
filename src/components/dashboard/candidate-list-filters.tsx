@@ -22,14 +22,16 @@ function Select({
   value,
   onChange,
   children,
+  className,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <label className="block min-w-[140px] flex-1">
+    <label className={cn("block min-w-[140px]", className)}>
       <span className="mb-0.5 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
         {label}
       </span>
@@ -44,16 +46,7 @@ function Select({
   );
 }
 
-const FILTER_KEYS = [
-  "status",
-  "assigned",
-  "mine",
-  "createdBy",
-  "updatedBy",
-  "job",
-  "from",
-  "to",
-] as const;
+const FILTER_KEYS = ["status", "assigned", "mine", "createdBy", "job"] as const;
 
 export function CandidateListFilters({
   statuses,
@@ -102,10 +95,11 @@ export function CandidateListFilters({
   const labelOf = (r: RecruiterOption) => r.full_name || r.email || r.user_id;
 
   return (
-    <div className="space-y-2.5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex flex-wrap items-end gap-2.5 lg:gap-3">
         <Select
           label="Status"
+          className="min-w-[160px] flex-[1_1_160px]"
           value={searchParams.get("status") ?? ""}
           onChange={(v) => update("status", v)}
         >
@@ -117,7 +111,8 @@ export function CandidateListFilters({
           ))}
         </Select>
         <Select
-          label="Assigned recruiter"
+          label="Assigned Recruiter"
+          className="min-w-[160px] flex-[1_1_160px]"
           value={
             searchParams.get("mine") === "1"
               ? "__mine__"
@@ -147,7 +142,8 @@ export function CandidateListFilters({
           ))}
         </Select>
         <Select
-          label="Created by"
+          label="Created By"
+          className="min-w-[160px] flex-[1_1_160px]"
           value={searchParams.get("createdBy") ?? ""}
           onChange={(v) => update("createdBy", v)}
         >
@@ -159,19 +155,8 @@ export function CandidateListFilters({
           ))}
         </Select>
         <Select
-          label="Last updated by"
-          value={searchParams.get("updatedBy") ?? ""}
-          onChange={(v) => update("updatedBy", v)}
-        >
-          <option value="">Anyone</option>
-          {recruiters.map((r) => (
-            <option key={r.user_id} value={r.user_id}>
-              {labelOf(r)}
-            </option>
-          ))}
-        </Select>
-        <Select
           label="Job"
+          className="min-w-[160px] flex-[1_1_160px]"
           value={searchParams.get("job") ?? ""}
           onChange={(v) => update("job", v)}
         >
@@ -182,40 +167,18 @@ export function CandidateListFilters({
             </option>
           ))}
         </Select>
-        <label className="block min-w-[140px] flex-1">
-          <span className="mb-0.5 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
-            Updated from
-          </span>
-          <input
-            type="date"
-            className="h-[38px] w-full rounded-md border border-slate-300 px-2 text-[13px] sm:h-10 sm:text-sm"
-            value={searchParams.get("from") ?? ""}
-            onChange={(e) => update("from", e.target.value)}
-          />
-        </label>
-        <label className="block min-w-[140px] flex-1">
-          <span className="mb-0.5 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
-            Updated to
-          </span>
-          <input
-            type="date"
-            className="h-[38px] w-full rounded-md border border-slate-300 px-2 text-[13px] sm:h-10 sm:text-sm"
-            value={searchParams.get("to") ?? ""}
-            onChange={(e) => update("to", e.target.value)}
-          />
-        </label>
-        <div className="flex items-end">
+        <div className="flex min-w-[120px] flex-[0_0_auto] items-end">
           <Link
             href={clearFiltersHref}
             aria-disabled={!hasActiveFilters}
             className={cn(
-              "inline-flex h-[38px] w-full items-center justify-center rounded-md border px-3 text-[13px] font-medium sm:h-10 sm:text-sm",
+              "inline-flex h-[38px] w-full items-center justify-center rounded-md px-3 text-[13px] font-medium sm:h-10 sm:text-sm",
               hasActiveFilters
-                ? "border-slate-300 text-slate-700 hover:bg-slate-50"
-                : "pointer-events-none border-slate-200 text-slate-400"
+                ? "border border-slate-300 text-slate-600 hover:bg-slate-50"
+                : "pointer-events-none border border-transparent text-slate-400"
             )}
           >
-            Clear filters
+            Clear Filters
           </Link>
         </div>
       </div>

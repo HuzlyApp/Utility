@@ -31,6 +31,10 @@ describe("candidate CRM schema migration", () => {
     expect(sql).toContain("'New / Not Contacted'");
     expect(sql).toContain("'Attempted Contact'");
     expect(sql).toContain("'Qualified-Ready for 2nd Interview'");
+    expect(sql).toContain("'Submitted for MSP Review'");
+    expect(sql).toContain("'Approved by MSP'");
+    expect(sql).toContain("'Selected by MSP Client'");
+    expect(sql).toContain("'Rejected at MSP Screening'");
     expect(sql).toContain("INSERT INTO candidate_notes");
     expect(sql).toContain("recruiter_notes");
   });

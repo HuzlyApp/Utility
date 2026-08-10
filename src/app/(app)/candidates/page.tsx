@@ -45,10 +45,7 @@ export default async function CandidatesListPage({
     status?: string;
     assigned?: string;
     createdBy?: string;
-    updatedBy?: string;
     job?: string;
-    from?: string;
-    to?: string;
     mine?: string;
   };
 }) {
@@ -73,14 +70,7 @@ export default async function CandidatesListPage({
       assignedRecruiterId: searchParams.mine === "1" ? undefined : assigned,
       mine: searchParams.mine === "1",
       createdByUserId: searchParams.createdBy || undefined,
-      updatedByUserId: searchParams.updatedBy || undefined,
       workspaceId: searchParams.job || undefined,
-      dateFrom: searchParams.from
-        ? new Date(searchParams.from).toISOString()
-        : undefined,
-      dateTo: searchParams.to
-        ? new Date(`${searchParams.to}T23:59:59`).toISOString()
-        : undefined,
       search: search || undefined,
       searchContact: canViewContact,
     }),
@@ -102,10 +92,7 @@ export default async function CandidatesListPage({
     status: searchParams.status,
     assigned: searchParams.assigned,
     createdBy: searchParams.createdBy,
-    updatedBy: searchParams.updatedBy,
     job: searchParams.job,
-    from: searchParams.from,
-    to: searchParams.to,
     mine: searchParams.mine,
   };
 

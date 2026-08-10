@@ -2,10 +2,22 @@ import "server-only";
 import { getSql } from "./client";
 import { AuthError, type AppUser } from "@/lib/auth/session";
 import { canManageTenant } from "@/lib/auth/rbac";
+import {
+  DASHBOARD_STATUS_TILES,
+  type DashboardStatusTileKey,
+} from "@/lib/routes";
 import { audit } from "./audit";
 import type { CandidateStatusRow } from "./types";
 
 export type CandidateStatus = CandidateStatusRow;
+
+export interface DashboardStatusTileCount {
+  key: DashboardStatusTileKey;
+  label: string;
+  statusId: string | null;
+  statusName: string | null;
+  count: number;
+}
 
 function tenantIdOf(user: AppUser): string {
   if (!user.tenantId) throw new AuthError("Tenant context is required.", 403);
@@ -74,13 +86,57 @@ export async function seedDefaultStatusesForTenant(tenantId: string): Promise<vo
         ('Candidate selected', '#166534', 110, false),
         ('Candidate Rejected', '#d1d5db', 120, false),
         ('Callback - not available', '#5b21b6', 130, false),
-        ('Rejected After 2nd Interview', '#991b1b', 140, false)
+        ('Rejected After 2nd Interview', '#991b1b', 140, false),
+        ('Submitted for MSP Review', '#0ea5e9', 160, false),
+        ('Approved by MSP', '#059669', 170, false),
+        ('Selected by MSP Client', '#166534', 180, false),
+        ('Rejected at MSP Screening', '#dc2626', 190, false)
     ) AS s(name, color, display_order, is_default)
     WHERE NOT EXISTS (
       SELECT 1 FROM candidate_statuses cs
       WHERE cs.tenant_id = ${tenantId} AND lower(cs.name) = lower(s.name)
     )
   `;
+}
+
+/**
+ * Counts candidates for each dashboard status tile for the current tenant.
+ * Matches tile config names against active tenant status options.
+ */
+export async function getDashboardStatusTileCounts(
+  user: AppUser
+): Promise<DashboardStatusTileCount[]> {
+  const statuses = await listCandidateStatuses(user);
+  const byLowerName = new Map(
+    statuses.map((s) => [s.name.trim().toLowerCase(), s] as const)
+  );
+
+  const sql = getSql();
+  const tenantId = tenantIdOf(user);
+  const counts = (await sql`
+    SELECT current_status_id AS status_id, COUNT(*)::int AS count
+    FROM candidates
+    WHERE tenant_id = ${tenantId}
+      AND current_status_id IS NOT NULL
+    GROUP BY current_status_id
+  `) as { status_id: string; count: number }[];
+  const countById = new Map(
+    counts.map((row) => [row.status_id, Number(row.count ?? 0)] as const)
+  );
+
+  return DASHBOARD_STATUS_TILES.map((tile) => {
+    const matched =
+      tile.matchNames
+        .map((name) => byLowerName.get(name.trim().toLowerCase()))
+        .find(Boolean) ?? null;
+    return {
+      key: tile.key,
+      label: tile.label,
+      statusId: matched?.id ?? null,
+      statusName: matched?.name ?? null,
+      count: matched ? (countById.get(matched.id) ?? 0) : 0,
+    };
+  });
 }
 
 export async function getStatusById(

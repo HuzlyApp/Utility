@@ -5,11 +5,12 @@ import {
   listWorkspaces,
   getRecentAnalyses,
 } from "@/lib/dal/workspaces";
+import { getDashboardStatusTileCounts } from "@/lib/dal/statuses";
 import { Card, CardBody } from "@/components/ui/primitives";
 import { DashboardJobWorkspaces } from "@/components/dashboard/dashboard-job-workspaces";
 import { RecentAnalyses } from "@/components/dashboard/recent-analyses";
 import { redirect } from "next/navigation";
-import { dashboardStatRoutes } from "@/lib/routes";
+import { candidateRoutes, dashboardStatRoutes } from "@/lib/routes";
 import { normalizeSearchQuery } from "@/lib/candidate-crm";
 import { cn } from "@/lib/cn";
 
@@ -52,6 +53,54 @@ function StatCard({
   );
 }
 
+function StatusTile({
+  label,
+  value,
+  href,
+}: {
+  label: string;
+  value: number;
+  href: string | null;
+}) {
+  const card = (
+    <Card
+      className={cn(
+        "h-full transition-all duration-150",
+        href
+          ? "cursor-pointer group-hover:-translate-y-0.5 group-hover:border-brand-300 group-hover:shadow-md group-focus-visible:border-brand-300"
+          : "opacity-90"
+      )}
+    >
+      <CardBody className="flex h-full min-h-[88px] flex-col justify-between gap-2 py-4">
+        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+          {label}
+        </p>
+        <p className="text-3xl font-bold text-slate-900">{value}</p>
+      </CardBody>
+    </Card>
+  );
+
+  if (!href) {
+    return (
+      <div className="min-w-0" aria-label={`${label}: ${value}`}>
+        {card}
+      </div>
+    );
+  }
+
+  return (
+    <Link
+      href={href}
+      aria-label={`View ${label} candidates`}
+      className={cn(
+        "group block min-w-0 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+      )}
+    >
+      {card}
+    </Link>
+  );
+}
+
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -62,8 +111,9 @@ export default async function DashboardPage({
 
   const search = normalizeSearchQuery(searchParams.q);
 
-  const [stats, workspaces, recent] = await Promise.all([
+  const [stats, statusTiles, workspaces, recent] = await Promise.all([
     getDashboardStats(user),
+    getDashboardStatusTileCounts(user),
     listWorkspaces(user, { search: search || undefined }),
     getRecentAnalyses(user),
   ]);
@@ -85,7 +135,7 @@ export default async function DashboardPage({
         </Link>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <StatCard
           label="Active Jobs"
           value={stats.active_jobs}
@@ -110,13 +160,23 @@ export default async function DashboardPage({
           tone="text-amber-600"
           href={dashboardStatRoutes.needsVerification}
         />
-        <StatCard
-          label="Ready to Submit"
-          value={stats.ready_to_submit}
-          tone="text-emerald-600"
-          href={dashboardStatRoutes.readyToSubmit}
-        />
       </div>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-slate-700">Candidate Status</h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {statusTiles.map((tile) => (
+            <StatusTile
+              key={tile.key}
+              label={tile.label}
+              value={tile.count}
+              href={
+                tile.statusId ? candidateRoutes.byStatus(tile.statusId) : null
+              }
+            />
+          ))}
+        </div>
+      </section>
 
       <div className="grid gap-6 lg:grid-cols-[1fr,320px]">
         <DashboardJobWorkspaces workspaces={workspaces} searchQuery={search} />

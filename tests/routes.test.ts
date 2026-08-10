@@ -44,8 +44,11 @@ describe("dashboardStatRoutes", () => {
     expect(dashboardStatRoutes.needsVerification).toBe(
       "/candidates?filter=needs-verification"
     );
-    expect(dashboardStatRoutes.readyToSubmit).toBe(
-      "/candidates?filter=ready-to-submit"
+  });
+
+  it("builds status-filtered candidate destinations", () => {
+    expect(candidateRoutes.byStatus("status-123")).toBe(
+      "/candidates?status=status-123"
     );
   });
 });
