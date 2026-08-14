@@ -1715,11 +1715,19 @@ export interface DashboardCandidateRow {
 export interface DashboardCandidateFilters {
   matchCategory?: string;
   submissionReadiness?: string;
+  /** @deprecated Prefer statusIds for multi-select. Still accepted as a single status. */
   statusId?: string;
+  /** Filter to candidates whose current status is one of these IDs. */
+  statusIds?: string[];
   assignedRecruiterId?: string | null;
   createdByUserId?: string;
   updatedByUserId?: string;
   workspaceId?: string;
+  /**
+   * When true, only candidates with at least one matched job workspace.
+   * When false, only candidates with no matched job.
+   */
+  hasMatchedJob?: boolean;
   dateFrom?: string;
   dateTo?: string;
   mine?: boolean;
@@ -1749,7 +1757,14 @@ export async function listDashboardCandidates(
   const tenantId = tenantIdOf(user);
   const matchCategory = opts?.matchCategory ?? null;
   const submissionReadiness = opts?.submissionReadiness ?? null;
-  const statusId = opts?.statusId ?? null;
+  const statusIds = (() => {
+    if (opts?.statusIds?.length) return opts.statusIds;
+    if (opts?.statusId) return [opts.statusId];
+    return [] as string[];
+  })();
+  const statusFilterActive = statusIds.length > 0;
+  const hasMatchedJob =
+    typeof opts?.hasMatchedJob === "boolean" ? opts.hasMatchedJob : null;
   const assignedRecruiterId =
     opts?.mine ? user.id : (opts?.assignedRecruiterId ?? null);
   const unassignedOnly = opts?.assignedRecruiterId === null && !opts?.mine;
@@ -1848,7 +1863,10 @@ export async function listDashboardCandidates(
       LEFT JOIN user_profiles ub ON ub.user_id = c.updated_by_user_id
       LEFT JOIN user_profiles cb ON cb.user_id = COALESCE(c.created_by_user_id, c.created_by, c.owner_user_id)
       WHERE c.tenant_id = ${tenantId}
-        AND (${statusId}::uuid IS NULL OR c.current_status_id = ${statusId}::uuid)
+        AND (
+          ${statusFilterActive} = false
+          OR c.current_status_id = ANY(${statusIds}::uuid[])
+        )
         AND (
           ${unassignedOnly} = false
           OR c.assigned_recruiter_id IS NULL
@@ -1870,6 +1888,27 @@ export async function listDashboardCandidates(
           OR EXISTS (
             SELECT 1 FROM job_match_candidates jmc
             WHERE jmc.candidate_id = c.id AND jmc.workspace_id = ${workspaceId}::uuid
+          )
+        )
+        AND (
+          ${hasMatchedJob}::boolean IS NULL
+          OR (
+            ${hasMatchedJob} = true
+            AND EXISTS (
+              SELECT 1
+              FROM job_match_candidates jmc_m
+              JOIN job_match_workspaces w_m ON w_m.id = jmc_m.workspace_id
+              WHERE jmc_m.candidate_id = c.id AND w_m.tenant_id = ${tenantId}
+            )
+          )
+          OR (
+            ${hasMatchedJob} = false
+            AND NOT EXISTS (
+              SELECT 1
+              FROM job_match_candidates jmc_m
+              JOIN job_match_workspaces w_m ON w_m.id = jmc_m.workspace_id
+              WHERE jmc_m.candidate_id = c.id AND w_m.tenant_id = ${tenantId}
+            )
           )
         )
         AND (${dateFrom}::timestamptz IS NULL OR c.updated_at >= ${dateFrom}::timestamptz)
@@ -1959,7 +1998,10 @@ export async function listDashboardCandidates(
       AND c.tenant_id = ${tenantId}
       AND (${matchCategory}::text IS NULL OR a.match_category = ${matchCategory})
       AND (${submissionReadiness}::text IS NULL OR a.submission_readiness = ${submissionReadiness})
-      AND (${statusId}::uuid IS NULL OR c.current_status_id = ${statusId}::uuid)
+      AND (
+        ${statusFilterActive} = false
+        OR c.current_status_id = ANY(${statusIds}::uuid[])
+      )
       AND (
         ${unassignedOnly} = false
         OR c.assigned_recruiter_id IS NULL
@@ -1977,6 +2019,14 @@ export async function listDashboardCandidates(
         OR c.updated_by_user_id = ${updatedByUserId}::uuid
       )
       AND (${workspaceId}::uuid IS NULL OR jmc.workspace_id = ${workspaceId}::uuid)
+      AND (
+        ${hasMatchedJob}::boolean IS NULL
+        OR ${hasMatchedJob} = true
+        OR (
+          ${hasMatchedJob} = false
+          AND false
+        )
+      )
       AND (${dateFrom}::timestamptz IS NULL OR c.updated_at >= ${dateFrom}::timestamptz)
       AND (${dateTo}::timestamptz IS NULL OR c.updated_at <= ${dateTo}::timestamptz)
       AND (

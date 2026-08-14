@@ -6,6 +6,10 @@ import {
   candidateFilterToSql,
   parseCandidateFilterParam,
 } from "@/lib/routes";
+import {
+  parseHasMatchedJobParam,
+  parseStatusIdsParam,
+} from "@/lib/candidate-list-table";
 import { canViewCandidateContact } from "@/lib/auth/rbac";
 import { normalizeSearchQuery } from "@/lib/candidate-crm";
 import { buildContactExtractionApiSummary } from "@/lib/contact-extract";
@@ -31,10 +35,15 @@ export async function GET(req: NextRequest) {
     const mine = url.searchParams.get("mine") === "1";
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");
+    const statusIds = parseStatusIdsParam(url.searchParams.get("status"));
+    const hasMatchedJob = parseHasMatchedJobParam(
+      url.searchParams.get("matchedJob")
+    );
 
     const candidates = await listDashboardCandidates(user, {
       ...sqlFilter,
-      statusId: url.searchParams.get("status") || undefined,
+      statusIds,
+      hasMatchedJob,
       assignedRecruiterId: mine ? undefined : assigned,
       mine,
       createdByUserId: url.searchParams.get("createdBy") || undefined,

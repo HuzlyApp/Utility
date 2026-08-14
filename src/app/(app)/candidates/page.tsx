@@ -16,6 +16,10 @@ import {
   parseCandidateFilterParam,
   type CandidateListFilter,
 } from "@/lib/routes";
+import {
+  parseHasMatchedJobParam,
+  parseStatusIdsParam,
+} from "@/lib/candidate-list-table";
 import { canViewCandidateContact } from "@/lib/auth/rbac";
 import { normalizeSearchQuery } from "@/lib/candidate-crm";
 import { cn } from "@/lib/cn";
@@ -46,7 +50,10 @@ export default async function CandidatesListPage({
     assigned?: string;
     createdBy?: string;
     job?: string;
+    matchedJob?: string;
     mine?: string;
+    sort?: string;
+    dir?: string;
   };
 }) {
   const user = await getCurrentUser();
@@ -57,6 +64,8 @@ export default async function CandidatesListPage({
   const sqlFilter = candidateFilterToSql(filter);
   const search = normalizeSearchQuery(searchParams.search);
   const canViewContact = canViewCandidateContact(user.role);
+  const statusIds = parseStatusIdsParam(searchParams.status);
+  const hasMatchedJob = parseHasMatchedJobParam(searchParams.matchedJob);
 
   const assigned =
     searchParams.assigned === "unassigned"
@@ -66,7 +75,8 @@ export default async function CandidatesListPage({
   const [items, statuses, users, workspaces] = await Promise.all([
     listDashboardCandidates(user, {
       ...sqlFilter,
-      statusId: searchParams.status || undefined,
+      statusIds,
+      hasMatchedJob,
       assignedRecruiterId: searchParams.mine === "1" ? undefined : assigned,
       mine: searchParams.mine === "1",
       createdByUserId: searchParams.createdBy || undefined,
@@ -93,7 +103,10 @@ export default async function CandidatesListPage({
     assigned: searchParams.assigned,
     createdBy: searchParams.createdBy,
     job: searchParams.job,
+    matchedJob: searchParams.matchedJob,
     mine: searchParams.mine,
+    sort: searchParams.sort,
+    dir: searchParams.dir,
   };
 
   const clearSearchHref = (() => {
