@@ -45,6 +45,97 @@ export interface ScoreValidationResult {
 const clamp = (n: number, min = 0, max = 100) =>
   Math.max(min, Math.min(max, n));
 
+const CHRONO_CONFLICT_RE =
+  /chronolog|anachron|before known product|feature claimed before/i;
+const STALE_OR_GAP_RE =
+  /stale relevant experience|employment gap|3\+ years since|most recent relevant role ended/i;
+const TIMELINE_PENALTY = 20;
+
+function mostMandatoriesConfirmed(
+  confirmed: number,
+  applicable: number
+): boolean {
+  if (applicable <= 0) return true;
+  return confirmed * 2 > applicable;
+}
+
+function hasChronoConflict(result: AiResult): boolean {
+  const texts = [
+    ...result.data_quality.resume_conflicts,
+    ...result.gaps_and_risks,
+  ];
+  return texts.some((text) => CHRONO_CONFLICT_RE.test(text));
+}
+
+function hasStaleGapWithMandatoryMiss(
+  result: AiResult,
+  mandatoryNotFound: number
+): boolean {
+  if (mandatoryNotFound < 1) return false;
+  const texts = [
+    ...result.data_quality.resume_conflicts,
+    ...result.gaps_and_risks,
+    ...result.experience_analysis.experience_calculation_notes,
+  ];
+  return texts.some((text) => STALE_OR_GAP_RE.test(text));
+}
+
+/**
+ * Apply prompt score ceilings so preferred strengths cannot inflate past
+ * critical mandatory gaps. Caps are the lowest applicable ceiling.
+ */
+export function mandatoryGapCeiling(args: {
+  mandatoryNotFound: number;
+  mandatoryConfirmed: number;
+  applicableMandatory: number;
+  chronoConflict: boolean;
+  staleGapWithMandatoryMiss: boolean;
+}): { ceiling: number | null; notes: string[] } {
+  let ceiling: number | null = null;
+  const notes: string[] = [];
+
+  if (args.mandatoryNotFound >= 2) {
+    ceiling = 45;
+    notes.push(
+      `Mandatory gap cap: ${args.mandatoryNotFound} critical mandatories NOT_FOUND -> score ceiling 45.`
+    );
+  } else if (args.mandatoryNotFound === 1) {
+    ceiling = 59;
+    notes.push(
+      "Mandatory gap cap: 1 critical mandatory NOT_FOUND -> score ceiling 59."
+    );
+  }
+
+  if (args.chronoConflict) {
+    const next = 59;
+    ceiling = ceiling == null ? next : Math.min(ceiling, next);
+    notes.push(
+      "Technology-timeline conflict cap: do not exceed WEAK_MATCH (59)."
+    );
+  }
+
+  if (args.staleGapWithMandatoryMiss) {
+    const next = 55;
+    ceiling = ceiling == null ? next : Math.min(ceiling, next);
+    notes.push(
+      "Employment-gap + mandatory NOT_FOUND cap: score ceiling 55."
+    );
+  }
+
+  if (
+    args.applicableMandatory > 0 &&
+    !mostMandatoriesConfirmed(args.mandatoryConfirmed, args.applicableMandatory)
+  ) {
+    const next = 74;
+    ceiling = ceiling == null ? next : Math.min(ceiling, next);
+    notes.push(
+      "GOOD_MATCH (75+) requires most mandatories CONFIRMED with work-history evidence."
+    );
+  }
+
+  return { ceiling, notes };
+}
+
 // Average the deterministic status score across a set of requirements.
 // NOT_APPLICABLE (null) requirements are excluded from the average.
 function averageStatusScore(reqs: AiRequirement[]): number | null {
@@ -163,12 +254,50 @@ export function validateAndScore(ai: AiResult): ScoreValidationResult {
   (Object.keys(SUBSCORE_WEIGHTS) as SubscoreKey[]).forEach((k) => {
     weightedTotal += SUBSCORE_WEIGHTS[k] * result.subscores[k];
   });
-  const overallScore = clamp(Math.round(weightedTotal));
+  let overallScore = clamp(Math.round(weightedTotal));
   if (overallScore !== result.candidate_match.recommended_overall_match_score) {
     adjustments.push(
       `Overall score recalculated from weighted subscores: AI recommended ${result.candidate_match.recommended_overall_match_score}, application computed ${overallScore}.`
     );
   }
+
+  const mandatoryNotFound = mandatory.filter(
+    (r) =>
+      r.status === "NOT_FOUND" && r.requirement_outcome !== "NOT_APPLICABLE"
+  ).length;
+  const mandatoryConfirmedCount = mandatory.filter(
+    (r) => r.requirement_outcome === "MET"
+  ).length;
+  const applicableMandatoryCount = mandatory.filter(
+    (r) => r.requirement_outcome !== "NOT_APPLICABLE"
+  ).length;
+  const chronoConflict = hasChronoConflict(result);
+  if (chronoConflict) {
+    const beforePenalty = overallScore;
+    overallScore = clamp(overallScore - TIMELINE_PENALTY);
+    adjustments.push(
+      `Applied technology-timeline penalty of ${TIMELINE_PENALTY}: ${beforePenalty} -> ${overallScore}.`
+    );
+  }
+
+  const { ceiling, notes: capNotes } = mandatoryGapCeiling({
+    mandatoryNotFound,
+    mandatoryConfirmed: mandatoryConfirmedCount,
+    applicableMandatory: applicableMandatoryCount,
+    chronoConflict,
+    staleGapWithMandatoryMiss: hasStaleGapWithMandatoryMiss(
+      result,
+      mandatoryNotFound
+    ),
+  });
+  for (const note of capNotes) adjustments.push(note);
+  if (ceiling != null && overallScore > ceiling) {
+    adjustments.push(
+      `Overall score capped from ${overallScore} to ${ceiling} by mandatory-gap rules.`
+    );
+    overallScore = ceiling;
+  }
+
   // AI's advisory score is preserved; the validated score is authoritative.
   result.candidate_match.recommended_overall_match_score = overallScore;
 

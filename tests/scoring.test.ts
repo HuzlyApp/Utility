@@ -177,3 +177,97 @@ describe("summarizeMandatory", () => {
     expect(summary).toEqual({ confirmed: 1, to_verify: 2, not_met: 1 });
   });
 });
+
+describe("mandatory gap score caps", () => {
+  const highSubscores = {
+    mandatory_requirements_score: 100,
+    specialty_experience_score: 100,
+    clinical_skills_score: 100,
+    licenses_certifications_score: 100,
+    work_setting_equipment_score: 100,
+    preferred_qualifications_score: 100,
+  };
+
+  it("caps overall score at 59 when one mandatory is NOT_FOUND", () => {
+    const ai = makeAiResult({
+      subscores: highSubscores,
+      mandatory_requirements: [
+        makeRequirement({ status: "CONFIRMED", requirement_outcome: "MET" }),
+        makeRequirement({
+          requirement: "SAFe",
+          status: "NOT_FOUND",
+          requirement_outcome: "VERIFY",
+        }),
+      ],
+    });
+    const { result, adjustments } = validateAndScore(ai);
+    expect(result.candidate_match.recommended_overall_match_score).toBeLessThanOrEqual(
+      59
+    );
+    expect(result.candidate_match.match_category).not.toBe("GOOD_MATCH");
+    expect(result.candidate_match.match_category).not.toBe("STRONG_MATCH");
+    expect(adjustments.join(" ")).toContain("score ceiling 59");
+  });
+
+  it("caps overall score at 45 when two mandatories are NOT_FOUND", () => {
+    const ai = makeAiResult({
+      subscores: highSubscores,
+      mandatory_requirements: [
+        makeRequirement({
+          requirement: "Microsoft Sentinel",
+          status: "NOT_FOUND",
+          requirement_outcome: "VERIFY",
+        }),
+        makeRequirement({
+          requirement: "Agile",
+          status: "NOT_FOUND",
+          requirement_outcome: "VERIFY",
+        }),
+      ],
+    });
+    const { result } = validateAndScore(ai);
+    expect(result.candidate_match.recommended_overall_match_score).toBeLessThanOrEqual(
+      45
+    );
+  });
+
+  it("does not allow GOOD_MATCH when most mandatories are not CONFIRMED", () => {
+    const ai = makeAiResult({
+      subscores: highSubscores,
+      mandatory_requirements: [
+        makeRequirement({ status: "CONFIRMED", requirement_outcome: "MET" }),
+        makeRequirement({
+          requirement: "Lead standups",
+          status: "PARTIAL",
+          requirement_outcome: "VERIFY",
+          candidate_evidence: "Participated as a member of an Agile team",
+        }),
+      ],
+    });
+    const { result } = validateAndScore(ai);
+    expect(result.candidate_match.recommended_overall_match_score).toBeLessThan(75);
+    expect(result.candidate_match.match_category).not.toBe("GOOD_MATCH");
+    expect(result.candidate_match.match_category).not.toBe("STRONG_MATCH");
+  });
+
+  it("applies a timeline penalty and WEAK_MATCH cap for chronological conflicts", () => {
+    const ai = makeAiResult({
+      subscores: highSubscores,
+      mandatory_requirements: [
+        makeRequirement({ status: "CONFIRMED", requirement_outcome: "MET" }),
+      ],
+      data_quality: {
+        ...makeAiResult().data_quality,
+        resume_conflicts: [
+          "Chronological inconsistency – feature claimed before known product availability; verify with candidate.",
+        ],
+      },
+    });
+    const { result, adjustments } = validateAndScore(ai);
+    expect(result.candidate_match.recommended_overall_match_score).toBeLessThanOrEqual(
+      59
+    );
+    expect(result.candidate_match.match_category).toBe("WEAK_MATCH");
+    expect(adjustments.join(" ")).toContain("technology-timeline");
+  });
+});

@@ -38,6 +38,21 @@ describe("Grok AI Integration", () => {
       expect(SYSTEM_PROMPT).toContain("alter scoring rules");
     });
 
+    it("includes named-product, evidence-location, and score-cap rules", () => {
+      expect(SYSTEM_PROMPT).toContain("NAMED PLATFORM / PRODUCT YEARS");
+      expect(SYSTEM_PROMPT).toContain("PROCESS / METHODOLOGY MUST-HAVES");
+      expect(SYSTEM_PROMPT).toContain("EVIDENCE LOCATION RULE");
+      expect(SYSTEM_PROMPT).toContain("PROCESS ROLE DEPTH");
+      expect(SYSTEM_PROMPT).toContain("SINGLE SCORE RULE");
+      expect(SYSTEM_PROMPT).toContain("ROLE-TITLE PLATFORM RULE");
+      expect(SYSTEM_PROMPT).toContain("MANDATORY GAP SCORE CAPS (STRICT)");
+      expect(SYSTEM_PROMPT).toContain("TECHNOLOGY TIMELINE CONSISTENCY");
+      expect(SYSTEM_PROMPT).toContain("EMPLOYMENT GAPS AND RECENCY");
+      expect(SYSTEM_PROMPT).toContain(
+        "Always return one integer for recommended_overall_match_score"
+      );
+    });
+
     it("requires JSON-only output", () => {
       expect(SYSTEM_PROMPT).toContain("Return valid JSON only");
       expect(SYSTEM_PROMPT).toContain("Do not include markdown");
