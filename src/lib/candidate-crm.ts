@@ -257,7 +257,7 @@ export function formatActivitySummary(params: {
     case "JOB_ARCHIVED":
       return `Job archived${newValue ? `: ${newValue}` : ""}`;
     case "JOB_REOPENED":
-      return `Job reopened${newValue ? `: ${newValue}` : ""}`;
+      return `Job unarchived${newValue ? `: ${newValue}` : ""}`;
     default:
       return actionType.replace(/_/g, " ").toLowerCase();
   }

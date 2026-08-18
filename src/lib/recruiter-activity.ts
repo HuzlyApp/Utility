@@ -375,7 +375,7 @@ export function formatFeedDescription(params: {
     case "JOB_ARCHIVED":
       return `${who} archived job ${job ?? params.newValue ?? ""}`.trim();
     case "JOB_REOPENED":
-      return `${who} reopened job ${job ?? params.newValue ?? ""}`.trim();
+      return `${who} unarchived job ${job ?? params.newValue ?? ""}`.trim();
     case "USER_LOGIN":
       return `${who} signed in`;
     case "DISPOSITION_UPDATED":

@@ -34,26 +34,46 @@ export function JobTiles({
   const router = useRouter();
   const { toast } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
-  const [archiveTarget, setArchiveTarget] = useState<WorkspaceSummary | null>(null);
-  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [statusTarget, setStatusTarget] = useState<{
+    workspace: WorkspaceSummary;
+    next: "ACTIVE" | "ARCHIVED";
+  } | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
-  async function confirmArchive() {
-    if (!archiveTarget) return;
-    setBusy(archiveTarget.id);
-    setArchiveError(null);
+  const restoring = statusTarget?.next === "ACTIVE";
+
+  async function confirmStatusChange() {
+    if (!statusTarget) return;
+    const { workspace, next } = statusTarget;
+    setBusy(workspace.id);
+    setStatusError(null);
     try {
-      const res = await fetch(`/api/workspaces/${archiveTarget.id}`, {
+      const res = await fetch(`/api/workspaces/${workspace.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workspace_status: "ARCHIVED" }),
+        body: JSON.stringify({ workspace_status: next }),
       });
       if (!res.ok) throw new Error();
-      setArchiveTarget(null);
-      toast("Workspace archived.", "success");
+      setStatusTarget(null);
+      toast(
+        next === "ARCHIVED"
+          ? "Workspace archived."
+          : "Job restored to active jobs.",
+        "success"
+      );
       router.refresh();
     } catch {
-      setArchiveError("Could not archive this workspace. Please try again.");
-      toast("Could not archive workspace.", "error");
+      setStatusError(
+        next === "ARCHIVED"
+          ? "Could not archive this workspace. Please try again."
+          : "Could not restore this job. Please try again."
+      );
+      toast(
+        next === "ARCHIVED"
+          ? "Could not archive workspace."
+          : "Could not restore job.",
+        "error"
+      );
     } finally {
       setBusy(null);
     }
@@ -139,19 +159,35 @@ export function JobTiles({
                 >
                   Edit Job
                 </Link>
-                <button
-                  type="button"
-                  onClick={(e) =>
-                    isolateCardAction(e, () => {
-                      setArchiveError(null);
-                      setArchiveTarget(w);
-                    })
-                  }
-                  disabled={busy === w.id || archived}
-                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:opacity-50"
-                >
-                  {busy === w.id ? "Archiving…" : "Archive"}
-                </button>
+                {archived ? (
+                  <button
+                    type="button"
+                    onClick={(e) =>
+                      isolateCardAction(e, () => {
+                        setStatusError(null);
+                        setStatusTarget({ workspace: w, next: "ACTIVE" });
+                      })
+                    }
+                    disabled={busy === w.id}
+                    className="rounded-lg border border-brand-300 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:opacity-50"
+                  >
+                    {busy === w.id ? "Unarchiving…" : "Unarchive"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(e) =>
+                      isolateCardAction(e, () => {
+                        setStatusError(null);
+                        setStatusTarget({ workspace: w, next: "ARCHIVED" });
+                      })
+                    }
+                    disabled={busy === w.id}
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:opacity-50"
+                  >
+                    {busy === w.id ? "Archiving…" : "Archive"}
+                  </button>
+                )}
                 <DeleteJobButton
                   workspaceId={w.id}
                   jobTitle={w.job_title}
@@ -167,30 +203,41 @@ export function JobTiles({
       </div>
 
       <ConfirmModal
-        isOpen={Boolean(archiveTarget)}
-        title="Archive job workspace?"
+        isOpen={Boolean(statusTarget)}
+        title={restoring ? "Unarchive job workspace?" : "Archive job workspace?"}
         description={
-          <>
-            Archive{" "}
-            <span className="font-medium text-slate-800">
-              {archiveTarget?.job_title || "this job"}
-            </span>
-            ? You can restore it later from archived jobs. Candidates and analyses stay
-            available.
-          </>
+          restoring ? (
+            <>
+              Restore{" "}
+              <span className="font-medium text-slate-800">
+                {statusTarget?.workspace.job_title || "this job"}
+              </span>{" "}
+              to the active jobs list? Candidates, notes, analyses, and other job
+              data stay intact.
+            </>
+          ) : (
+            <>
+              Archive{" "}
+              <span className="font-medium text-slate-800">
+                {statusTarget?.workspace.job_title || "this job"}
+              </span>
+              ? You can restore it later from archived jobs. Candidates and analyses stay
+              available.
+            </>
+          )
         }
-        confirmLabel="Archive job"
-        confirmLoadingLabel="Archiving…"
+        confirmLabel={restoring ? "Unarchive job" : "Archive job"}
+        confirmLoadingLabel={restoring ? "Unarchiving…" : "Archiving…"}
         cancelLabel="Cancel"
-        variant="warning"
-        isLoading={busy === archiveTarget?.id}
-        error={archiveError}
+        variant={restoring ? "success" : "warning"}
+        isLoading={busy === statusTarget?.workspace.id}
+        error={statusError}
         onCancel={() => {
           if (busy) return;
-          setArchiveTarget(null);
-          setArchiveError(null);
+          setStatusTarget(null);
+          setStatusError(null);
         }}
-        onConfirm={confirmArchive}
+        onConfirm={confirmStatusChange}
       />
     </>
   );
@@ -213,9 +260,14 @@ function JobCardBody({
             {w.job_ref ? ` · Job ID ${w.job_ref}` : ""}
           </p>
         </div>
-        <Badge tone={w.job_status === "OPEN" ? "green" : "slate"}>
-          {w.job_status}
-        </Badge>
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          {w.workspace_status === "ARCHIVED" ? (
+            <Badge tone="slate">Archived</Badge>
+          ) : null}
+          <Badge tone={w.job_status === "OPEN" ? "green" : "slate"}>
+            {w.job_status}
+          </Badge>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">

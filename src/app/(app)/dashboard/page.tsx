@@ -114,7 +114,10 @@ export default async function DashboardPage({
   const [stats, statusTiles, workspaces, recent] = await Promise.all([
     getDashboardStats(user),
     getDashboardStatusTileCounts(user),
-    listWorkspaces(user, { search: search || undefined }),
+    listWorkspaces(user, {
+      includeArchived: true,
+      search: search || undefined,
+    }),
     getRecentAnalyses(user),
   ]);
 

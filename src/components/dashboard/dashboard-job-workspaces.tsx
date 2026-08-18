@@ -4,7 +4,9 @@ import Link from "next/link";
 import { Suspense, useState } from "react";
 import { JobSearchInput } from "@/components/dashboard/job-search-input";
 import { JobTiles } from "@/components/dashboard/job-tiles";
-import { dashboardStatRoutes } from "@/lib/routes";
+import { ArchivedJobsSection } from "@/components/dashboard/job-workspace-sections";
+import { dashboardStatRoutes, jobRoutes } from "@/lib/routes";
+import { splitWorkspaces } from "@/lib/workspace-lists";
 import type { WorkspaceSummary } from "@/lib/dal/types";
 import { cn } from "@/lib/cn";
 
@@ -16,6 +18,7 @@ export function DashboardJobWorkspaces({
   searchQuery: string;
 }) {
   const [searchPending, setSearchPending] = useState(false);
+  const { active, archived } = splitWorkspaces(workspaces);
 
   return (
     <section>
@@ -67,20 +70,33 @@ export function DashboardJobWorkspaces({
             </span>
           </div>
         ) : null}
-        <JobTiles
-          workspaces={workspaces}
-          emptyMessage={
-            searchQuery ? "No job workspaces match your search." : undefined
-          }
-          emptyAction={
-            searchQuery
-              ? {
-                  label: "Clear search",
-                  href: "/dashboard",
-                }
-              : undefined
-          }
-        />
+
+        <div className="space-y-8">
+          <JobTiles
+            workspaces={active}
+            emptyMessage={
+              searchQuery ? "No job workspaces match your search." : undefined
+            }
+            emptyAction={
+              searchQuery
+                ? {
+                    label: "Clear search",
+                    href: "/dashboard",
+                  }
+                : undefined
+            }
+          />
+          <ArchivedJobsSection
+            workspaces={archived}
+            searchQuery={searchQuery}
+            clearSearchHref="/dashboard"
+            viewAllHref={jobRoutes.list({
+              status: "archived",
+              q: searchQuery || undefined,
+            })}
+            viewAllLabel="View archived"
+          />
+        </div>
       </div>
     </section>
   );

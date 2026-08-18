@@ -25,8 +25,12 @@ describe("dashboard job workspace search UI", () => {
 
     expect(dashboard).toContain("DashboardJobWorkspaces");
     expect(dashboard).toContain("searchParams");
+    expect(dashboard).toContain("includeArchived: true");
     expect(section).toContain("Job Workspaces");
     expect(section).toContain('placeholder="Search jobs by title or job code"');
+    expect(section).toContain("ArchivedJobsSection");
+    expect(section).toContain("View archived");
+    expect(section).toContain("splitWorkspaces");
     expect(section).toContain("No job workspaces match your search.");
     expect(section).toContain("Clear search");
     expect(section).toContain("Searching…");

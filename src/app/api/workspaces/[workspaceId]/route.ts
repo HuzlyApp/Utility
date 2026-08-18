@@ -20,11 +20,19 @@ export async function PATCH(
     const existing = await getWorkspace(user, params.workspaceId);
     if (!existing) return fail("Workspace not found.", 404, "NOT_FOUND");
 
-    const body = (await req.json()) as WorkspaceInput & { workspace_status?: "ACTIVE" | "ARCHIVED" };
-    if (body.workspace_status === "ARCHIVED" || body.workspace_status === "ACTIVE") {
-      await setWorkspaceStatus(user, params.workspaceId, body.workspace_status);
+    const body = (await req.json()) as WorkspaceInput & {
+      workspace_status?: "ACTIVE" | "ARCHIVED";
+    };
+    const { workspace_status, ...workspaceFields } = body;
+    if (workspace_status === "ARCHIVED" || workspace_status === "ACTIVE") {
+      await setWorkspaceStatus(user, params.workspaceId, workspace_status);
     }
-    await updateWorkspace(user, params.workspaceId, body);
+    const hasWorkspaceUpdates = Object.values(workspaceFields).some(
+      (value) => value !== undefined
+    );
+    if (hasWorkspaceUpdates) {
+      await updateWorkspace(user, params.workspaceId, workspaceFields);
+    }
     return ok({ id: params.workspaceId });
   });
 }

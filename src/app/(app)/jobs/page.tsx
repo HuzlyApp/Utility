@@ -3,10 +3,11 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { getCurrentUser } from "@/lib/auth/session";
 import { listWorkspaces } from "@/lib/dal/workspaces";
-import { JobTiles } from "@/components/dashboard/job-tiles";
 import { JobSearchInput } from "@/components/dashboard/job-search-input";
+import { JobWorkspaceSections } from "@/components/dashboard/job-workspace-sections";
 import { parseJobStatusParam, jobRoutes } from "@/lib/routes";
 import { normalizeSearchQuery } from "@/lib/candidate-crm";
+import { splitWorkspaces } from "@/lib/workspace-lists";
 import { cn } from "@/lib/cn";
 
 export const dynamic = "force-dynamic";
@@ -28,15 +29,10 @@ export default async function JobsListPage({
   const status = parseJobStatusParam(searchParams.status);
   const search = normalizeSearchQuery(searchParams.q);
   const workspaces = await listWorkspaces(user, {
-    includeArchived: status === "archived" || status === "all",
+    includeArchived: true,
     search: search || undefined,
   });
-  const filtered =
-    status === "archived"
-      ? workspaces.filter((w) => w.workspace_status === "ARCHIVED")
-      : status === "active"
-        ? workspaces.filter((w) => w.workspace_status === "ACTIVE")
-        : workspaces;
+  const { active, archived } = splitWorkspaces(workspaces);
 
   return (
     <div className="space-y-6">
@@ -64,17 +60,17 @@ export default async function JobsListPage({
 
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Job status filter">
         {STATUS_TABS.map((tab) => {
-          const active = status === tab.value;
+          const selected = status === tab.value;
           const href = jobRoutes.list({ status: tab.value, q: search || undefined });
           return (
             <Link
               key={tab.value}
               href={href}
               role="tab"
-              aria-selected={active}
+              aria-selected={selected}
               className={cn(
                 "rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
-                active
+                selected
                   ? "bg-slate-900 text-white"
                   : "border border-slate-300 text-slate-600 hover:bg-slate-50"
               )}
@@ -89,19 +85,13 @@ export default async function JobsListPage({
         <JobSearchInput initialQuery={search} />
       </Suspense>
 
-      <JobTiles
-        workspaces={filtered}
-        emptyMessage={
-          search ? "No job workspaces match your search." : undefined
-        }
-        emptyAction={
-          search
-            ? {
-                label: "Clear search",
-                href: jobRoutes.list({ status }),
-              }
-            : undefined
-        }
+      <JobWorkspaceSections
+        active={active}
+        archived={archived}
+        searchQuery={search}
+        showActive={status !== "archived"}
+        showArchived
+        clearSearchHref={jobRoutes.list({ status })}
       />
     </div>
   );
