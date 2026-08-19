@@ -37,6 +37,8 @@ export function makeAiResult(overrides: Partial<AiResult> = {}): AiResult {
       mandatory_requirement_override: false,
       recommended_action: "CALL_AND_VERIFY",
       recruiter_decision_summary: "Summary",
+      submission_note: "",
+      action_guidance: "",
     },
     subscores: {
       mandatory_requirements_score: 80,

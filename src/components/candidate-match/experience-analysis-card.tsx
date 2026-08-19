@@ -2,7 +2,8 @@
 
 import React from "react";
 import { Badge, Card, CardBody, CardHeader } from "@/components/ui/primitives";
-import { ClockIcon, CheckIcon, AlertIcon } from "@/components/ui/icons";
+import { ClockIcon } from "@/components/ui/icons";
+import { parseLabeledItem } from "@/lib/match-display";
 import type { AiResult } from "@/lib/clientTypes";
 
 function yearsLabel(value: number | null): string {
@@ -11,26 +12,9 @@ function yearsLabel(value: number | null): string {
   return `${rounded} yrs`;
 }
 
-function Flag({ confirmed, label }: { confirmed: boolean; label: string }) {
-  return (
-    <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-      {confirmed ? (
-        <CheckIcon className="h-4 w-4 flex-none text-green-600" />
-      ) : (
-        <AlertIcon className="h-4 w-4 flex-none text-amber-600" />
-      )}
-      <div>
-        <p className="text-xs font-medium text-slate-500">{label}</p>
-        <p className="text-sm font-semibold text-slate-800">
-          {confirmed ? "Confirmed" : "Not documented"}
-        </p>
-      </div>
-    </div>
-  );
-}
-
 export function ExperienceAnalysisCard({ result }: { result: AiResult }) {
   const exp = result.experience_analysis;
+  const notes = exp.experience_calculation_notes;
   const metrics = [
     {
       label: "Total professional",
@@ -49,57 +33,61 @@ export function ExperienceAnalysisCard({ result }: { result: AiResult }) {
   return (
     <Card>
       <CardHeader
-        title="Experience Analysis"
-        description="Calculated from dated employment only — not summary claims."
+        title="Experience calculation"
+        description="Dated employment only. Specialty ownership and recent roles are weighted against the JD — not summary claims."
         icon={<ClockIcon className="h-5 w-5 text-blue-600" />}
         action={
           exp.is_estimated ? <Badge tone="amber">Estimated</Badge> : undefined
         }
       />
       <CardBody className="space-y-4">
+        {notes.length > 0 ? (
+          <ul className="space-y-2.5">
+            {notes.map((raw, i) => {
+              const item = parseLabeledItem(raw);
+              return (
+                <li
+                  key={i}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5"
+                >
+                  {item.label ? (
+                    <>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {item.label}
+                      </p>
+                      <p className="mt-0.5 text-sm text-slate-800">
+                        {item.detail}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-800">{item.detail}</p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="text-sm text-slate-500">
+            No qualitative experience notes were returned. Years below are from
+            dated employment only.
+          </p>
+        )}
+
         <div className="grid grid-cols-3 gap-3">
           {metrics.map((m) => (
             <div
               key={m.label}
-              className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-center"
+              className="rounded-lg border border-slate-200 px-3 py-2 text-center"
             >
               <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
                 {m.label}
               </p>
-              <p className="mt-1 text-lg font-semibold text-slate-900">
+              <p className="mt-1 text-base font-semibold text-slate-900">
                 {m.value}
               </p>
             </div>
           ))}
         </div>
-
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Flag
-            confirmed={exp.travel_experience_confirmed}
-            label="Travel experience"
-          />
-          <Flag
-            confirmed={exp.required_work_setting_experience_confirmed}
-            label="Required work setting"
-          />
-        </div>
-
-        {exp.experience_calculation_notes.length > 0 ? (
-          <div>
-            <h4 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
-              Calculation notes
-            </h4>
-            <ul className="list-inside list-disc space-y-1 text-sm text-slate-600">
-              {exp.experience_calculation_notes.map((note, i) => (
-                <li key={i}>{note}</li>
-              ))}
-            </ul>
-          </div>
-        ) : (
-          <p className="text-sm text-slate-400">
-            No additional experience calculation notes.
-          </p>
-        )}
       </CardBody>
     </Card>
   );

@@ -24,8 +24,10 @@ import { MatchMetricGrid } from "@/components/candidate-match/match-metric-grid"
 import { ExperienceAnalysisCard } from "@/components/candidate-match/experience-analysis-card";
 import { AlternativeFitCard } from "@/components/candidate-match/alternative-fit-card";
 import { ScoreExplanationPanel } from "@/components/candidate-match/score-explanation-panel";
+import { RecruiterSummaryCard } from "@/components/candidate-match/recruiter-summary-card";
 import { DataQualityPanel } from "@/components/candidate-match/data-quality-panel";
 import { DISPLAY_CATEGORY, DISPLAY_ACTION, type MatchCategory } from "@/lib/types";
+import { confidenceBand } from "@/lib/match-display";
 import { summarizeMandatory } from "@/lib/scoring";
 import type { AiResult } from "@/lib/schema";
 import type { EntityFile, DashboardDisposition } from "@/lib/dal/types";
@@ -729,7 +731,9 @@ export function CandidateDetail({
               {cm && (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Badge tone="blue">{DISPLAY_CATEGORY[cm.match_category as MatchCategory]}</Badge>
-                  <Badge tone="slate">Confidence {cm.confidence_score}%</Badge>
+                  <Badge tone="slate">
+                    Confidence {confidenceBand(cm.confidence_score)} ({cm.confidence_score}%)
+                  </Badge>
                   <Badge tone="slate">{DISPLAY_ACTION[cm.recommended_action]}</Badge>
                   {updatingResume && <Badge tone="amber">Updating resume</Badge>}
                   {analysis?.resume_version ? (
@@ -744,6 +748,9 @@ export function CandidateDetail({
               {cm && (
                 <p className="mt-2 text-sm text-slate-600">{cm.recruiter_decision_summary}</p>
               )}
+              {cm?.action_guidance?.trim() ? (
+                <p className="mt-1 text-sm text-slate-600">{cm.action_guidance}</p>
+              ) : null}
             </div>
             <div className="flex flex-col items-stretch gap-2 sm:items-end">
               <AiModelSelector
@@ -784,7 +791,6 @@ export function CandidateDetail({
               result={r}
               mandatory={summarizeMandatory(r.mandatory_requirements)}
             />
-            <ExperienceAnalysisCard result={r} />
             <QualificationTable
               requirements={requirements}
               questions={r.screening_questions}
@@ -818,10 +824,9 @@ export function CandidateDetail({
               onSaveVerification={saveVerification}
               savingRequirement={savingRequirement}
             />
-            <div className="grid gap-6 md:grid-cols-2">
-              <StrengthsCard strengths={r.strengths} />
-              <RisksCard risks={r.gaps_and_risks} />
-            </div>
+            <StrengthsCard strengths={r.strengths} />
+            <RisksCard risks={r.gaps_and_risks} />
+            <ExperienceAnalysisCard result={r} />
             <div>
               <ScreeningQuestions
                 questions={r.screening_questions}
@@ -836,6 +841,7 @@ export function CandidateDetail({
                 </div>
               )}
             </div>
+            <RecruiterSummaryCard result={r} />
             <AlternativeFitCard result={r} />
             <ScoreExplanationPanel result={r} />
             <DataQualityPanel result={r} scoreAdjustments={analysis?.score_adjustments ?? []} />

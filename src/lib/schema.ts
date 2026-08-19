@@ -9,6 +9,7 @@ import {
   COMPLETENESS_LEVELS,
   SUBMISSION_READINESS,
 } from "./types";
+import { labeledItemFromUnknown } from "./match-display";
 
 const score0to100 = z.number().min(0).max(100);
 
@@ -50,10 +51,7 @@ export type AiScreeningQuestion = z.infer<typeof screeningQuestionSchema>;
 
 const stringOrObjectToString = z.union([
   z.string(),
-  z.record(z.unknown()).transform((obj) => {
-    const text = obj.text ?? obj.risk ?? obj.gap ?? obj.strength ?? obj.message;
-    return typeof text === "string" ? text : JSON.stringify(obj);
-  }),
+  z.record(z.unknown()).transform((obj) => labeledItemFromUnknown(obj)),
 ]);
 
 export const aiResultSchema = z.object({
@@ -75,6 +73,8 @@ export const aiResultSchema = z.object({
     mandatory_requirement_override: z.boolean().default(false),
     recommended_action: z.enum(RECOMMENDED_ACTIONS),
     recruiter_decision_summary: z.string().default(""),
+    submission_note: z.string().default(""),
+    action_guidance: z.string().default(""),
   }),
   subscores: z.object({
     mandatory_requirements_score: score0to100,

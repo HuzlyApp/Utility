@@ -292,6 +292,34 @@ RECRUITER GUIDANCE
 
 Provide: a concise match summary (max 3 sentences) in recruiter_decision_summary covering strongest strengths, biggest uncertainty, and submission recommendation; confirmed strengths (max 5); mandatory and preferred requirement statuses; relevant experience calculation; specific recruiter screening questions (typically 4–6, max focused on highest-impact uncertainties); submission risks; recommended recruiter action; and suggestions for better-fitting job types when redirect is appropriate.
 
+REQUIRED NARRATIVE BLOCKS (must populate these JSON fields — do not leave them empty when evidence exists)
+
+gaps_and_risks:
+Write 4–8 recruiter-facing bullets in "Short label — explanation" form. Include when applicable:
+• Role-title / ownership-depth mismatch (e.g., Agile coach vs Product Manager)
+• Thin measurable product outcomes vs the JD
+• Named-product, methodology, or domain gaps
+• Unconfirmed logistics (on-site, work auth, schedule)
+• Why the score is held below GOOD_MATCH (score-band bias)
+• Whether a hard knockout exists — or explicitly that years/mandatories did not knock out
+
+experience_calculation_notes:
+Write labeled lines (use "Label: detail"), typically:
+• Total professional: N years (supported in span / estimated)
+• Relevant specialty ownership: confirmed / partial / unclear — verify
+• Adjacent or hybrid experience (coaching, BA, delivery) if it dominates recent tenure
+• Recent (last 2–3 years): role titles and how they weight vs the JD
+Do not leave this array empty when dated employment exists.
+
+action_guidance:
+One sentence qualifying the recommended_action (e.g., "CALL_AND_VERIFY only if they can prove consumer digital product ownership and Plano on-site; otherwise STOP_FOR_THIS_JOB / Redirect").
+
+submission_note:
+One or two client-ready sentences a recruiter could paste when submitting or holding.
+
+alternative_fit.possible_job_types:
+List better-fitting job types when ownership, title, or domain is only a partial fit. Set redirect_recommended when those types are clearly a better use of the candidate than this JD.
+
 Do not recommend stopping pursuit based only on an incomplete résumé.
 
 When the job description contains conflicting information: identify the conflict, use the most restrictive clearly stated mandatory requirement for preliminary screening, and tell the recruiter what must be confirmed with the client/MSP. When the résumé contains conflicting dates or qualifications: identify the conflict, reduce confidence, and ask the recruiter to verify it.
@@ -341,7 +369,9 @@ export const RESPONSE_SCHEMA = `{
     "confidence_score": 0,
     "mandatory_requirement_override": false,
     "recommended_action": "PRIORITIZE_AND_CALL|CALL_AND_VERIFY|KEEP_AS_POSSIBLE|REDIRECT_TO_OTHER_JOB|STOP_FOR_THIS_JOB",
-    "recruiter_decision_summary": ""
+    "recruiter_decision_summary": "",
+    "submission_note": "",
+    "action_guidance": ""
   },
   "subscores": {
     "mandatory_requirements_score": 0,
@@ -395,11 +425,19 @@ function formatRequirementsList(items: string[]): string {
   return items.map((r) => `- ${r}`).join("\n");
 }
 
+const NARRATIVE_FIELDS_INSTRUCTION = `
+Also populate these recruiter-facing fields:
+- gaps_and_risks: 4–8 bullets as "Short label — explanation" (title/ownership fit, thin outcomes vs JD, logistics, why not GOOD_MATCH, knockout status).
+- experience_calculation_notes: labeled lines such as "Total professional: …", "Relevant specialty ownership: …", "Recent (last 2–3 years): …". Do not leave empty when dated employment exists.
+- action_guidance: one sentence qualifying recommended_action.
+- submission_note: 1–2 client-ready sentences for submit/hold.
+- alternative_fit.possible_job_types: better-fit roles when this JD is only a partial match.`;
+
 function conciseOutputInstruction(resumeChars: number): string {
   if (resumeChars < 8_000) return "";
   return `
 OUTPUT SIZE LIMIT
-The résumé is long. Keep candidate_evidence to one short sentence per requirement. Limit strengths and gaps_and_risks to the top 5 items each. Return complete valid JSON within the output token budget.`;
+The résumé is long. Keep candidate_evidence to one short sentence per requirement. Limit strengths to the top 5 items and gaps_and_risks to the top 8 items. Return complete valid JSON within the output token budget.`;
 }
 
 // Build a concise user prompt that avoids repeating job text when structured
@@ -470,6 +508,7 @@ INSTRUCTIONS
 10. Quote or closely reference exact candidate evidence for every qualification.
 11. Keep evidence statements concise (1-2 sentences each).
 12. Return valid JSON only using the required response structure.
+${NARRATIVE_FIELDS_INSTRUCTION}
 ${conciseOutputInstruction(args.resume_text.length)}
 
 Required JSON structure:
@@ -544,6 +583,7 @@ INSTRUCTIONS
 10. Quote or closely reference exact candidate evidence for every qualification.
 11. Keep evidence statements concise (1-2 sentences each).
 12. Return valid JSON only using the required response structure.
+${NARRATIVE_FIELDS_INSTRUCTION}
 ${conciseOutputInstruction(args.resume_text.length)}
 
 Required JSON structure:
@@ -600,6 +640,7 @@ INSTRUCTIONS
 11. Quote or closely reference exact candidate evidence for every qualification.
 12. Keep evidence statements concise (1-2 sentences each).
 13. Return valid JSON only using the required response structure.
+${NARRATIVE_FIELDS_INSTRUCTION}
 ${conciseOutputInstruction(args.resume_text.length)}
 
 Required JSON structure:
@@ -616,7 +657,7 @@ export function buildRepairPrompt(
   const truncationNote = opts?.truncated
     ? `
 Your previous response was CUT OFF because it exceeded the output token limit. Return a SHORTER complete JSON object.
-Use one short sentence per candidate_evidence. Limit strengths and gaps_and_risks to the top 5 items each.
+Use one short sentence per candidate_evidence. Limit strengths to the top 5 items and gaps_and_risks to the top 8 items.
 `
     : "";
   return `Your previous response did not match the required JSON schema.

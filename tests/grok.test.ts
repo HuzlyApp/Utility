@@ -48,6 +48,9 @@ describe("Grok AI Integration", () => {
       expect(SYSTEM_PROMPT).toContain("MANDATORY GAP SCORE CAPS (STRICT)");
       expect(SYSTEM_PROMPT).toContain("TECHNOLOGY TIMELINE CONSISTENCY");
       expect(SYSTEM_PROMPT).toContain("EMPLOYMENT GAPS AND RECENCY");
+      expect(SYSTEM_PROMPT).toContain("REQUIRED NARRATIVE BLOCKS");
+      expect(SYSTEM_PROMPT).toContain("gaps_and_risks:");
+      expect(SYSTEM_PROMPT).toContain("experience_calculation_notes:");
       expect(SYSTEM_PROMPT).toContain(
         "Always return one integer for recommended_overall_match_score"
       );

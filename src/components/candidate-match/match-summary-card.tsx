@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/icons";
 import type { AiResult, MandatorySummary } from "@/lib/clientTypes";
 import { DISPLAY_ACTION } from "@/lib/types";
+import { confidenceBand } from "@/lib/match-display";
 
 export function MatchSummaryCard({
   result,
@@ -59,7 +60,7 @@ export function MatchSummaryCard({
             <span>
               Confidence
               <span className="ml-1 font-semibold text-slate-800">
-                {cm.confidence_score}%
+                {confidenceBand(cm.confidence_score)} ({cm.confidence_score}%)
               </span>
             </span>
             <span>
@@ -92,6 +93,11 @@ export function MatchSummaryCard({
             </span>
             <Badge tone="blue">{DISPLAY_ACTION[cm.recommended_action]}</Badge>
           </div>
+          {cm.action_guidance?.trim() ? (
+            <p className="mt-2 text-sm leading-relaxed text-slate-600">
+              {cm.action_guidance}
+            </p>
+          ) : null}
 
           {/* Mandatory summary line with corrected terminology */}
           <p className="mt-3 text-sm text-slate-600">

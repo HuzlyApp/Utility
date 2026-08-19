@@ -25,6 +25,7 @@ import { RecruiterDecisionPanel } from "./recruiter-decision-panel";
 import { AlternativeFitCard } from "./alternative-fit-card";
 import { DataQualityPanel } from "./data-quality-panel";
 import { ExperienceAnalysisCard } from "./experience-analysis-card";
+import { RecruiterSummaryCard } from "./recruiter-summary-card";
 import {
   CandidateRankingPanel,
   type RankedCandidate,
@@ -172,9 +173,6 @@ export function MatchAssessment({
           {/* 4. Summary metrics */}
           <MatchMetricGrid result={r} mandatory={data.mandatory_summary} />
 
-          {/* 4b. Experience calculation */}
-          <ExperienceAnalysisCard result={r} />
-
           {/* 5. Mandatory + preferred status */}
           <div ref={requirementsRef}>
             <QualificationTable
@@ -186,11 +184,12 @@ export function MatchAssessment({
             />
           </div>
 
-          {/* 6. Strengths / verification needs */}
-          <div className="grid gap-6 md:grid-cols-2">
-            <StrengthsCard strengths={r.strengths} />
-            <RisksCard risks={r.gaps_and_risks} />
-          </div>
+          {/* 6. Strengths, then gaps & risks (tightened rules) */}
+          <StrengthsCard strengths={r.strengths} />
+          <RisksCard risks={r.gaps_and_risks} />
+
+          {/* 6b. Experience calculation */}
+          <ExperienceAnalysisCard result={r} />
 
           {/* 7. Screening questions */}
           <div ref={screeningRef}>
@@ -201,7 +200,10 @@ export function MatchAssessment({
             />
           </div>
 
-          {/* 8. Alternative fit (conditional) */}
+          {/* 8. Recruiter summary + submission note */}
+          <RecruiterSummaryCard result={r} />
+
+          {/* 9. Better-fit job types */}
           <AlternativeFitCard result={r} />
 
           {/* 9. Score explanation + data quality */}

@@ -94,6 +94,16 @@ export function buildReportHtml(args: {
     r.submission_readiness.readiness_status
   )} · <strong>Confidence:</strong> ${cm.confidence_score}%</p>
   <p>${esc(cm.recruiter_decision_summary)}</p>
+  ${
+    cm.action_guidance
+      ? `<p><strong>Action guidance:</strong> ${esc(cm.action_guidance)}</p>`
+      : ""
+  }
+  ${
+    cm.submission_note
+      ? `<h2>Submission note</h2><p>${esc(cm.submission_note)}</p>`
+      : ""
+  }
 
   <h2>Experience analysis${r.experience_analysis.is_estimated ? " (estimated)" : ""}</h2>
   <p class="meta">
