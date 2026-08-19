@@ -29,6 +29,7 @@ export function SubmissionReadinessBanner({ result }: { result: AiResult }) {
   const meta = READINESS_META[status];
   const blocking = result.submission_readiness.blocking_requirements;
   const toVerify = result.submission_readiness.items_to_verify_before_submission;
+  const documents = result.submission_readiness.documents_or_credentials_needed;
   const explanation =
     blocking[0] ??
     toVerify[0] ??
@@ -40,16 +41,55 @@ export function SubmissionReadinessBanner({ result }: { result: AiResult }) {
     <div className={cn("rounded-xl border p-4", BANNER_STYLE[status])}>
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex-none">{icon(status)}</span>
-        <div className="flex-1">
-          <p className="text-sm font-semibold">{meta.label}</p>
-          <p className="mt-0.5 text-sm opacity-90">{explanation}</p>
-          {blocking.length > 0 && (
-            <p className="mt-1 text-xs font-medium">
-              {blocking.length} blocking item{blocking.length > 1 ? "s" : ""}
-            </p>
-          )}
+        <div className="flex-1 space-y-3">
+          <div>
+            <p className="text-sm font-semibold">{meta.label}</p>
+            <p className="mt-0.5 text-sm opacity-90">{explanation}</p>
+          </div>
+
+          {blocking.length > 0 ? (
+            <ReadinessList
+              title={`Blocking requirement${blocking.length > 1 ? "s" : ""}`}
+              items={blocking}
+            />
+          ) : null}
+
+          {toVerify.length > 0 ? (
+            <ReadinessList
+              title="Items to verify before submission"
+              items={toVerify}
+            />
+          ) : null}
+
+          {documents.length > 0 ? (
+            <ReadinessList
+              title="Documents or credentials needed"
+              items={documents}
+            />
+          ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ReadinessList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide opacity-80">
+        {title}
+      </p>
+      <ul className="mt-1 space-y-1 text-sm opacity-90">
+        {items.map((item, i) => (
+          <li key={i} className="flex items-start gap-2">
+            <span
+              aria-hidden
+              className="mt-1.5 h-1.5 w-1.5 flex-none rounded-full bg-current opacity-60"
+            />
+            {item}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

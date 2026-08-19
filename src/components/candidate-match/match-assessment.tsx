@@ -24,6 +24,7 @@ import { ScoreExplanationPanel } from "./score-explanation-panel";
 import { RecruiterDecisionPanel } from "./recruiter-decision-panel";
 import { AlternativeFitCard } from "./alternative-fit-card";
 import { DataQualityPanel } from "./data-quality-panel";
+import { ExperienceAnalysisCard } from "./experience-analysis-card";
 import {
   CandidateRankingPanel,
   type RankedCandidate,
@@ -170,6 +171,9 @@ export function MatchAssessment({
 
           {/* 4. Summary metrics */}
           <MatchMetricGrid result={r} mandatory={data.mandatory_summary} />
+
+          {/* 4b. Experience calculation */}
+          <ExperienceAnalysisCard result={r} />
 
           {/* 5. Mandatory + preferred status */}
           <div ref={requirementsRef}>

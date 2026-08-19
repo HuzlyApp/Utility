@@ -9,19 +9,24 @@ import type { AiResult } from "@/lib/clientTypes";
 export function DataQualityPanel({
   result,
   scoreAdjustments,
+  defaultOpen = false,
 }: {
   result: AiResult;
   scoreAdjustments: string[];
+  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
   const dq = result.data_quality;
-  const exp = result.experience_analysis;
+  const hasNotes =
+    dq.missing_information.length > 0 ||
+    dq.job_description_conflicts.length > 0 ||
+    dq.resume_conflicts.length > 0 ||
+    scoreAdjustments.length > 0;
+  const [open, setOpen] = useState(defaultOpen || hasNotes);
 
   const sections: { title: string; items: string[] }[] = [
     { title: "Missing information", items: dq.missing_information },
     { title: "Job-description conflicts", items: dq.job_description_conflicts },
     { title: "Résumé conflicts", items: dq.resume_conflicts },
-    { title: "Experience calculations", items: exp.experience_calculation_notes },
     { title: "Score adjustments", items: scoreAdjustments },
   ];
 

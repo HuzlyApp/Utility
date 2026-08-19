@@ -19,8 +19,14 @@ import { QualificationTable, type VerificationState } from "@/components/candida
 import { StrengthsCard } from "@/components/candidate-match/strengths-card";
 import { RisksCard } from "@/components/candidate-match/risks-card";
 import { ScreeningQuestions } from "@/components/candidate-match/screening-questions";
+import { LimitedInfoCard } from "@/components/candidate-match/limited-info-card";
+import { MatchMetricGrid } from "@/components/candidate-match/match-metric-grid";
+import { ExperienceAnalysisCard } from "@/components/candidate-match/experience-analysis-card";
+import { AlternativeFitCard } from "@/components/candidate-match/alternative-fit-card";
+import { ScoreExplanationPanel } from "@/components/candidate-match/score-explanation-panel";
 import { DataQualityPanel } from "@/components/candidate-match/data-quality-panel";
 import { DISPLAY_CATEGORY, DISPLAY_ACTION, type MatchCategory } from "@/lib/types";
+import { summarizeMandatory } from "@/lib/scoring";
 import type { AiResult } from "@/lib/schema";
 import type { EntityFile, DashboardDisposition } from "@/lib/dal/types";
 import { DASHBOARD_DISPOSITIONS, DISPOSITION_LABELS } from "@/lib/dal/types";
@@ -773,6 +779,12 @@ export function CandidateDetail({
         {r ? (
           <>
             <SubmissionReadinessBanner result={r} />
+            <LimitedInfoCard result={r} />
+            <MatchMetricGrid
+              result={r}
+              mandatory={summarizeMandatory(r.mandatory_requirements)}
+            />
+            <ExperienceAnalysisCard result={r} />
             <QualificationTable
               requirements={requirements}
               questions={r.screening_questions}
@@ -824,6 +836,8 @@ export function CandidateDetail({
                 </div>
               )}
             </div>
+            <AlternativeFitCard result={r} />
+            <ScoreExplanationPanel result={r} />
             <DataQualityPanel result={r} scoreAdjustments={analysis?.score_adjustments ?? []} />
           </>
         ) : (

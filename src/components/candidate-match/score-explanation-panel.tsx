@@ -10,7 +10,7 @@ import type { AiResult } from "@/lib/clientTypes";
 const LABELS: Record<SubscoreKey, string> = {
   mandatory_requirements_score: "Mandatory requirements",
   specialty_experience_score: "Specialty experience",
-  clinical_skills_score: "Clinical skills",
+  clinical_skills_score: "Clinical / role-critical skills",
   licenses_certifications_score: "Licenses and certifications",
   work_setting_equipment_score: "Work setting and equipment",
   preferred_qualifications_score: "Preferred qualifications",

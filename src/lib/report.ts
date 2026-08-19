@@ -134,6 +134,24 @@ export function buildReportHtml(args: {
     r.submission_readiness.documents_or_credentials_needed
   )}
 
+  <h2>Alternative fit</h2>
+  <p><strong>Redirect recommended:</strong> ${
+    r.alternative_fit.redirect_recommended ? "Yes" : "No"
+  }</p>
+  <p>${esc(r.alternative_fit.redirect_reason || "None.")}</p>
+  ${list(r.alternative_fit.possible_job_types)}
+
+  <h2>Data quality</h2>
+  <p class="meta">
+    Résumé completeness: ${esc(r.data_quality.resume_completeness)} ·
+    Job completeness: ${esc(r.data_quality.job_description_completeness)}
+  </p>
+  <strong>Missing information:</strong> ${list(r.data_quality.missing_information)}
+  <strong>Job-description conflicts:</strong> ${list(
+    r.data_quality.job_description_conflicts
+  )}
+  <strong>Résumé conflicts:</strong> ${list(r.data_quality.resume_conflicts)}
+
   <div class="disclaimer">
     This assessment is AI-assisted decision support. It does not make the final
     employment or submission decision. A recruiter must verify mandatory

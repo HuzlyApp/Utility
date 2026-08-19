@@ -8,8 +8,8 @@ export function RisksCard({ risks }: { risks: string[] }) {
   return (
     <Card>
       <CardHeader
-        title="Verification Needs"
-        description="Items to confirm during screening — not confirmed failures."
+        title="Gaps & Risks"
+        description="Submission risks, missing evidence, and items to confirm during screening."
         icon={<AlertIcon className="h-5 w-5 text-amber-600" />}
       />
       <CardBody>
