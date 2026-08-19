@@ -86,7 +86,11 @@ export default async function WorkspacePage({
         main={
           <>
             <div id="add-candidates">
-              <AddCandidates workspaceId={ws.id} />
+              <AddCandidates
+                workspaceId={ws.id}
+                jobTitle={ws.job_title}
+                jobRef={ws.job_ref}
+              />
             </div>
 
             <Card>

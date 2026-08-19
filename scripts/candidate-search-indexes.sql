@@ -18,3 +18,12 @@ CREATE INDEX IF NOT EXISTS idx_candidates_phone_normalized
 
 CREATE INDEX IF NOT EXISTS idx_candidates_tenant_updated
   ON candidates (tenant_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_candidates_resume_trgm
+  ON candidates USING gin (extracted_resume_text gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_candidates_specialty_trgm
+  ON candidates USING gin (specialty gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_candidates_location_trgm
+  ON candidates USING gin (location gin_trgm_ops);

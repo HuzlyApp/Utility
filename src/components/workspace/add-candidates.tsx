@@ -10,6 +10,8 @@ import { normalizeCandidateName, isCheckableCandidateName } from "@/lib/duplicat
 import { isDuplicateConfirmationRequired } from "@/lib/duplicate-candidate/messages";
 import type { DuplicateConfirmationRequired } from "@/lib/duplicate-candidate/messages";
 import { DuplicateWarningDialog } from "./duplicate-warning-dialog";
+import { ImportCandidatesModal } from "./import-candidates-modal";
+import { UserPlusIcon } from "@/components/ui/icons";
 
 type SubStatus =
   | "QUEUED"
@@ -50,13 +52,22 @@ function niceSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function AddCandidates({ workspaceId }: { workspaceId: string }) {
+export function AddCandidates({
+  workspaceId,
+  jobTitle,
+  jobRef,
+}: {
+  workspaceId: string;
+  jobTitle?: string | null;
+  jobRef?: string | null;
+}) {
   const router = useRouter();
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [subs, setSubs] = useState<Submission[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [pasteOpen, setPasteOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [pasteName, setPasteName] = useState("");
   const [pasteText, setPasteText] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -315,7 +326,7 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
         <div>
           <h2 className="text-base font-semibold text-slate-900">Add Candidates</h2>
           <p className="text-sm text-slate-500">
-            Upload multiple résumés or résumé images to compare against this job.
+            Upload multiple résumés or import existing candidates from your talent database.
           </p>
         </div>
 
@@ -339,6 +350,20 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
           <p className="mt-2 text-xs text-slate-400">
             PDF, DOC, DOCX, TXT, JPG, PNG, WEBP. Multiple images can be combined into one candidate.
           </p>
+          <div className="my-3 flex items-center gap-3">
+            <div className="h-px flex-1 bg-slate-200" />
+            <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">or</span>
+            <div className="h-px flex-1 bg-slate-200" />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={() => setImportOpen(true)}
+          >
+            <UserPlusIcon className="h-4 w-4" />
+            Import Candidates
+          </Button>
           <input
             ref={inputRef}
             type="file"
@@ -483,6 +508,17 @@ export function AddCandidates({ workspaceId }: { workspaceId: string }) {
           onCancel={handleDuplicateCancel}
         />
       )}
+      <ImportCandidatesModal
+        workspaceId={workspaceId}
+        jobTitle={jobTitle}
+        jobRef={jobRef}
+        isOpen={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => {
+          notifyWorkspaceCandidatesChanged(workspaceId);
+          router.refresh();
+        }}
+      />
     </Card>
   );
 }

@@ -40,7 +40,11 @@ export default async function AddCandidatesPage({
           Upload resumes for {ws.job_title || "this job"}.
         </p>
       </div>
-      <AddCandidates workspaceId={ws.id} />
+      <AddCandidates
+        workspaceId={ws.id}
+        jobTitle={ws.job_title}
+        jobRef={ws.job_ref}
+      />
     </div>
   );
 }
