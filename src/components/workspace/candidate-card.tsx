@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { Badge, Button } from "@/components/ui/primitives";
-import { DISPLAY_CATEGORY, type MatchCategory } from "@/lib/types";
+import { DISPLAY_CATEGORY, type AnalysisMode, type MatchCategory } from "@/lib/types";
 import type { RankedCandidateRow } from "@/lib/dal/types";
 import {
   CandidateStatusSelect,
@@ -11,6 +11,7 @@ import {
 } from "@/components/candidate/candidate-status-select";
 import { ModelBadge } from "@/components/workspace/ai-model-selector";
 import { CandidateIdentityCell } from "@/components/workspace/candidate-identity-cell";
+import { AnalysisModeButtons } from "@/components/workspace/analysis-mode-buttons";
 import { displayCandidateName } from "@/lib/resume-name";
 
 /**
@@ -92,6 +93,7 @@ export function CandidateCard({
   selected,
   progress,
   busy,
+  busyMode = null,
   batchRunning,
   retryingContact = false,
   onToggleSelect,
@@ -107,10 +109,11 @@ export function CandidateCard({
   selected: boolean;
   progress?: CandidateProgressInfo;
   busy: boolean;
+  busyMode?: AnalysisMode | null;
   batchRunning: boolean;
   retryingContact?: boolean;
   onToggleSelect: (candidateId: string, hasAnalysis: boolean) => void;
-  onAnalyze: (candidateId: string) => void;
+  onAnalyze: (candidateId: string, mode: AnalysisMode) => void;
   onOpenNotes: (candidateId: string, name: string) => void;
   onStatusChanged: () => void;
   onRetryContactExtraction?: (candidateId: string) => void;
@@ -237,25 +240,23 @@ export function CandidateCard({
 
       {/* Actions */}
       <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="col-span-2">
+          <AnalysisModeButtons
+            onSelect={(mode) => onAnalyze(row.candidate_id, mode)}
+            disabled={busy || batchRunning}
+            busyMode={busy ? busyMode : null}
+            progressLabel={
+              progress && progress.stage !== "completed"
+                ? `${progress.percent}%`
+                : undefined
+            }
+            hasAnalysis={Boolean(row.latest_analysis_id)}
+            failed={row.status === "FAILED"}
+          />
+        </div>
         <Button
           variant="secondary"
-          className="h-11 w-full"
-          onClick={() => onAnalyze(row.candidate_id)}
-          disabled={busy || batchRunning}
-        >
-          {busy
-            ? progress
-              ? `${progress.percent}%`
-              : "…"
-            : row.status === "FAILED"
-              ? "Retry"
-              : row.latest_analysis_id
-                ? "Reanalyze"
-                : "Analyze"}
-        </Button>
-        <Button
-          variant="secondary"
-          className="h-11 w-full"
+          className="col-span-2 h-11 w-full"
           onClick={() => onOpenNotes(row.candidate_id, name)}
         >
           Notes

@@ -68,4 +68,43 @@ describe("AI response schema validation", () => {
     const parsed = parseAiResult("not json at all");
     expect(parsed.ok).toBe(false);
   });
+
+  it("parses lean Analyze JSON and lifts it into the full result shape", () => {
+    const lean = {
+      recommended_overall_match_score: 72,
+      match_category: "POSSIBLE_MATCH",
+      recommended_action: "CALL_AND_VERIFY",
+      mandatory_requirements: [
+        {
+          requirement: "Microsoft Sentinel",
+          status: "CONFIRMED",
+          evidence: "Administered Sentinel at Contoso from 2021-2024.",
+        },
+      ],
+      preferred_requirements: [
+        { requirement: "Azure", status: "PARTIAL", evidence: "Listed under skills." },
+      ],
+      screening_questions: ["Can you confirm Sentinel ownership vs support?"],
+      items_to_verify: ["Work authorization"],
+      blocking_requirements: [],
+    };
+    const parsed = parseAiResult(JSON.stringify(lean), "analyze");
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.data.candidate_match.recommended_overall_match_score).toBe(72);
+    expect(parsed.data.candidate_match.match_category).toBe("POSSIBLE_MATCH");
+    expect(parsed.data.mandatory_requirements[0]?.candidate_evidence).toContain("Sentinel");
+    expect(parsed.data.mandatory_requirements[0]?.requirement_outcome).toBe("MET");
+    expect(parsed.data.screening_questions[0]?.question).toContain("Sentinel");
+    expect(parsed.data.submission_readiness.items_to_verify_before_submission).toEqual([
+      "Work authorization",
+    ]);
+    expect(parsed.data.strengths).toEqual([]);
+    expect(parsed.data.gaps_and_risks).toEqual([]);
+  });
+
+  it("still accepts the full detailed schema when Analyze mode is selected", () => {
+    const parsed = parseAiResult(JSON.stringify(makeAiResult()), "analyze");
+    expect(parsed.ok).toBe(true);
+  });
 });

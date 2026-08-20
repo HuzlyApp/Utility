@@ -9,6 +9,7 @@ import {
 import { ok, fail, logServerError } from "@/lib/http";
 import { summarizeMandatory } from "@/lib/scoring";
 import type { AnalyzeRequestBody } from "@/lib/types";
+import { resolveAnalysisMode } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -36,11 +37,16 @@ export async function POST(
     }
 
     const selection = resolveAiSelection(body);
-    const analysis = await performAnalysis(body, {
-      provider: selection.provider,
-      model: selection.model,
-      optionId: selection.optionId,
-    });
+    const analysisMode = resolveAnalysisMode(body.analysis_mode);
+    const analysis = await performAnalysis(
+      { ...body, analysis_mode: analysisMode },
+      {
+        provider: selection.provider,
+        model: selection.model,
+        optionId: selection.optionId,
+        analysisMode,
+      }
+    );
 
     let newAnalysisId: string | null = null;
     try {

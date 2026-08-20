@@ -18,6 +18,7 @@ export function logAnalysisOperation(
       inputChars: meta.inputCharCount,
       resumeChars: meta.resumeCharCount,
       jobChars: meta.jobCharCount,
+      analysisMode: meta.analysisMode,
       ...details,
     })
   );

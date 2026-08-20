@@ -1,5 +1,5 @@
 import {
-  SYSTEM_PROMPT,
+  systemPromptForMode,
   buildUserPrompt,
   buildRepairPrompt,
 } from "@/lib/prompt";
@@ -32,6 +32,7 @@ import type {
   ProviderAdapter,
 } from "./types";
 import { DEFAULT_AI_MODEL_OPTION } from "./types";
+import { DEFAULT_ANALYSIS_MODE } from "@/lib/types";
 
 const adapters: Record<AiProvider, ProviderAdapter> = {
   grok: claudeProvider, // Grok disabled - route to Claude
@@ -83,6 +84,8 @@ export async function analyzeCandidate(
   const model = adapter.resolveModel(args.model);
   const optionId = optionIdFor(args.provider, args.optionId);
 
+  const analysisMode = args.analysisMode ?? DEFAULT_ANALYSIS_MODE;
+
   const analysisMeta: AnalysisCallMeta = {
     analysisId: meta?.analysisId,
     tenantId: meta?.tenantId,
@@ -93,15 +96,16 @@ export async function analyzeCandidate(
     jobCharCount: args.job_description_text.length,
     provider: args.provider,
     model,
+    analysisMode,
   };
 
-  logAnalysisOperation("analysis_started", analysisMeta);
+  logAnalysisOperation("analysis_started", analysisMeta, { analysisMode });
   const timer = new PerformanceTimer();
   timer.start("prompt_build");
 
-  const userPrompt = buildUserPrompt(args);
+  const userPrompt = buildUserPrompt({ ...args, analysisMode });
   const baseMessages: ChatMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: systemPromptForMode(analysisMode) },
     { role: "user", content: userPrompt },
   ];
 
@@ -140,7 +144,7 @@ export async function analyzeCandidate(
       );
     }
 
-    const firstParsed = parseAiResult(firstRaw);
+    const firstParsed = parseAiResult(firstRaw, analysisMode);
     timer.end("json_parse");
     timer.start("validation");
 
@@ -190,7 +194,10 @@ export async function analyzeCandidate(
       { role: "assistant", content: firstRaw },
       {
         role: "user",
-        content: buildRepairPrompt(firstRaw, firstParsed.error, { truncated }),
+        content: buildRepairPrompt(firstRaw, firstParsed.error, {
+          truncated,
+          analysisMode,
+        }),
       },
     ];
 
@@ -209,7 +216,7 @@ export async function analyzeCandidate(
       );
     }
 
-    const repairParsed = parseAiResult(repairRaw);
+    const repairParsed = parseAiResult(repairRaw, analysisMode);
     timer.end("repair_retry");
 
     if (repairParsed.ok) {

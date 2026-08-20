@@ -188,7 +188,10 @@ const MAX_ACTION_BY_CATEGORY: Record<MatchCategory, RecommendedAction> = {
  * confidence and submission readiness in application code. The AI's
  * recommended values are treated as advisory only.
  */
-export function validateAndScore(ai: AiResult): ScoreValidationResult {
+export function validateAndScore(
+  ai: AiResult,
+  opts?: { preserveAdvisoryOverallScore?: boolean }
+): ScoreValidationResult {
   const adjustments: string[] = [];
   const result: AiResult = structuredClone(ai);
 
@@ -250,15 +253,24 @@ export function validateAndScore(ai: AiResult): ScoreValidationResult {
   });
 
   // 3. Weighted total, computed in code (spec section 8).
-  let weightedTotal = 0;
-  (Object.keys(SUBSCORE_WEIGHTS) as SubscoreKey[]).forEach((k) => {
-    weightedTotal += SUBSCORE_WEIGHTS[k] * result.subscores[k];
-  });
-  let overallScore = clamp(Math.round(weightedTotal));
-  if (overallScore !== result.candidate_match.recommended_overall_match_score) {
-    adjustments.push(
-      `Overall score recalculated from weighted subscores: AI recommended ${result.candidate_match.recommended_overall_match_score}, application computed ${overallScore}.`
+  // Lean Analyze has no model subscores; keep the advisory overall score and
+  // still apply gap caps / timeline penalties below.
+  let overallScore: number;
+  if (opts?.preserveAdvisoryOverallScore) {
+    overallScore = clamp(
+      Math.round(result.candidate_match.recommended_overall_match_score)
     );
+  } else {
+    let weightedTotal = 0;
+    (Object.keys(SUBSCORE_WEIGHTS) as SubscoreKey[]).forEach((k) => {
+      weightedTotal += SUBSCORE_WEIGHTS[k] * result.subscores[k];
+    });
+    overallScore = clamp(Math.round(weightedTotal));
+    if (overallScore !== result.candidate_match.recommended_overall_match_score) {
+      adjustments.push(
+        `Overall score recalculated from weighted subscores: AI recommended ${result.candidate_match.recommended_overall_match_score}, application computed ${overallScore}.`
+      );
+    }
   }
 
   const mandatoryNotFound = mandatory.filter(
@@ -362,6 +374,23 @@ export function validateAndScore(ai: AiResult): ScoreValidationResult {
   result.candidate_match.display_category = DISPLAY_CATEGORY[category];
   result.candidate_match.mandatory_requirement_override = mandatoryOverride;
 
+  if (opts?.preserveAdvisoryOverallScore) {
+    const originalCategory = ai.candidate_match.match_category;
+    const hasBlockers =
+      result.submission_readiness.blocking_requirements.length > 0;
+    if (hasBlockers || originalCategory === "NOT_CURRENTLY_SUBMITTABLE") {
+      category = "NOT_CURRENTLY_SUBMITTABLE";
+      mandatoryOverride = true;
+      result.candidate_match.match_category = category;
+      result.candidate_match.display_category = DISPLAY_CATEGORY[category];
+      result.candidate_match.mandatory_requirement_override = true;
+    } else if (originalCategory === "NEEDS_MORE_INFORMATION") {
+      category = "NEEDS_MORE_INFORMATION";
+      result.candidate_match.match_category = category;
+      result.candidate_match.display_category = DISPLAY_CATEGORY[category];
+    }
+  }
+
   // 6. Confidence: start from AI confidence, reduce for each detected conflict.
   const conflictCount =
     result.data_quality.job_description_conflicts.length +
@@ -416,7 +445,8 @@ function deriveReadiness(args: {
   applicableMandatory: number;
   mandatoryConfirmed: number;
 }): SubmissionReadiness {
-  if (args.mandatoryNotMet > 0) return "NOT_CURRENTLY_SUBMITTABLE";
+  if (args.mandatoryNotMet > 0 || args.category === "NOT_CURRENTLY_SUBMITTABLE")
+    return "NOT_CURRENTLY_SUBMITTABLE";
   if (args.category === "NEEDS_MORE_INFORMATION") return "INSUFFICIENT_INFORMATION";
   if (args.mandatoryVerify > 0 || args.mandatoryConflict > 0)
     return "VERIFY_BEFORE_SUBMISSION";

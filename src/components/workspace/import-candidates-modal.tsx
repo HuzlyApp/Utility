@@ -54,7 +54,7 @@ function FilterSelect({
   children: React.ReactNode;
 }) {
   return (
-    <label className="block min-w-[128px] flex-1">
+    <label className="block min-w-0">
       <span className="mb-0.5 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
         {label}
       </span>
@@ -99,7 +99,7 @@ function ChipRow({
   }
 
   return (
-    <div className="min-w-[160px] flex-1">
+    <div className="min-w-0">
       <span className="mb-0.5 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
         {label}
       </span>
@@ -108,7 +108,7 @@ function ChipRow({
           <button
             key={tag}
             type="button"
-            className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-200"
+            className="inline-flex max-w-full items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-left text-[11px] font-medium text-slate-700 hover:bg-slate-200"
             onClick={() => onChange(values.filter((v) => v !== tag))}
           >
             {tag}
@@ -137,7 +137,7 @@ function ChipRow({
             <button
               key={s}
               type="button"
-              className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] text-slate-600 hover:border-brand-300 hover:text-brand-700"
+              className="max-w-full rounded-full border border-slate-200 px-2 py-0.5 text-left text-[11px] text-slate-600 hover:border-brand-300 hover:text-brand-700"
               onClick={() => add(s)}
             >
               {s}
@@ -418,7 +418,7 @@ export function ImportCandidatesModal({
 
   const content = (
     <div
-      className="fixed inset-0 z-[90] flex items-end justify-center bg-slate-900/50 p-0 sm:items-center sm:p-4"
+      className="fixed inset-0 z-[90] flex items-end justify-center overflow-hidden bg-slate-900/50 p-0 sm:items-center sm:p-4"
       onMouseDown={(e) => {
         if (importing) return;
         if (e.target === e.currentTarget) onClose();
@@ -429,9 +429,9 @@ export function ImportCandidatesModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex h-[100dvh] w-full max-w-6xl flex-col overflow-hidden bg-white shadow-xl sm:h-[min(92vh,880px)] sm:rounded-xl"
+        className="flex h-[100dvh] max-h-[100dvh] w-full min-h-0 flex-col overflow-hidden bg-white shadow-xl sm:h-[min(880px,calc(100dvh-32px))] sm:max-h-[calc(100dvh-32px)] sm:w-[min(1200px,calc(100vw-32px))] sm:rounded-xl"
       >
-        <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-4 py-4 sm:px-5">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 px-4 py-4 sm:px-5">
           <div className="min-w-0">
             <h2 id={titleId} className="text-base font-semibold text-slate-900">
               Import Candidates
@@ -453,7 +453,7 @@ export function ImportCandidatesModal({
         </div>
 
         {preview ? (
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-5">
+          <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
             <CandidatePreview
               candidate={preview}
               onBack={() => setPreview(null)}
@@ -461,227 +461,229 @@ export function ImportCandidatesModal({
             />
           </div>
         ) : (
-          <>
-            <div className="space-y-3 border-b border-slate-100 px-4 py-3 sm:px-5">
-              <Tabs
-                tabs={[
-                  {
-                    value: "recommended",
-                    label: `Recommended${recommendedCount != null ? ` (${recommendedCount})` : ""}`,
-                  },
-                  {
-                    value: "all",
-                    label: `All Candidates${allCount != null ? ` (${allCount.toLocaleString()})` : ""}`,
-                  },
-                ]}
-                value={tab}
-                onChange={(v) => {
-                  const next = v as TabValue;
-                  setTab(next);
-                  setMinMatch(next === "recommended" ? "60" : "0");
-                }}
-              />
-
-              <div className="relative">
-                <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <TextInput
-                  autoFocus
-                  className="pl-9"
-                  placeholder="Search candidates..."
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  aria-label="Search candidates"
+          <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
+              <div className="space-y-3 border-b border-slate-100 px-4 py-3 sm:px-5">
+                <Tabs
+                  tabs={[
+                    {
+                      value: "recommended",
+                      label: `Recommended${recommendedCount != null ? ` (${recommendedCount})` : ""}`,
+                    },
+                    {
+                      value: "all",
+                      label: `All Candidates${allCount != null ? ` (${allCount.toLocaleString()})` : ""}`,
+                    },
+                  ]}
+                  value={tab}
+                  onChange={(v) => {
+                    const next = v as TabValue;
+                    setTab(next);
+                    setMinMatch(next === "recommended" ? "60" : "0");
+                  }}
                 />
-              </div>
 
-              <div className="flex flex-wrap gap-2">
-                <FilterSelect label="Role" value={role} onChange={setRole}>
-                  <option value="">All Roles</option>
-                  {(data?.suggestedRoles ?? []).map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </FilterSelect>
-                <FilterSelect label="Location" value={location} onChange={setLocation}>
-                  <option value="">All locations</option>
-                  {(data?.facets.locations ?? []).map((loc) => (
-                    <option key={loc} value={loc}>
-                      {loc}
-                    </option>
-                  ))}
-                </FilterSelect>
-                <FilterSelect label="Experience" value={experience} onChange={setExperience}>
-                  <option value="">Any experience</option>
-                  <option value="under3">Under 3 years</option>
-                  <option value="3to5">3–5 years</option>
-                  <option value="5to10">5–10 years</option>
-                  <option value="10plus">10+ years</option>
-                </FilterSelect>
-                <FilterSelect label="Match Score" value={minMatch} onChange={setMinMatch}>
-                  {tab === "all" && <option value="0">Any match</option>}
-                  <option value="60">60%+ Possible</option>
-                  <option value="70">70%+ Good</option>
-                  <option value="80">80%+ Strong</option>
-                  <option value="90">90%+ Excellent</option>
-                </FilterSelect>
-                <FilterSelect label="Status" value={statusId} onChange={setStatusId}>
-                  <option value="">All statuses</option>
-                  {(data?.facets.statuses ?? []).map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </FilterSelect>
-                <label className="block min-w-[140px] flex-1">
-                  <span className="mb-0.5 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                    Previous title
-                  </span>
-                  <input
-                    className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-[13px] text-slate-800"
-                    placeholder="e.g. Product Lead"
-                    value={previousTitle}
-                    onChange={(e) => setPreviousTitle(e.target.value)}
+                <div className="relative">
+                  <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <TextInput
+                    autoFocus
+                    className="pl-9"
+                    placeholder="Search candidates..."
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    aria-label="Search candidates"
                   />
-                </label>
-              </div>
-
-              <div className="grid gap-3 md:grid-cols-2">
-                <ChipRow
-                  label="Skills"
-                  values={skills}
-                  suggestions={data?.suggestedSkills ?? []}
-                  onChange={setSkills}
-                  placeholder="Filter by skills"
-                />
-                <ChipRow
-                  label="Tags"
-                  values={tags}
-                  suggestions={data?.suggestedTags ?? []}
-                  onChange={setTags}
-                  placeholder="Filter by tags"
-                />
-              </div>
-
-              {hasFilters && (
-                <div>
-                  <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
-                    Clear Filters
-                  </Button>
                 </div>
-              )}
-            </div>
 
-            <div className="min-h-0 flex-1 overflow-auto">
-              {loading && (
-                <p className="px-5 py-10 text-center text-sm text-slate-500">
-                  Searching candidates…
-                </p>
-              )}
-              {!loading && error && (
-                <div className="px-5 py-10 text-center">
-                  <p className="text-sm text-red-700">{error}</p>
-                  <Button className="mt-3" variant="secondary" size="sm" onClick={() => void load()}>
-                    Try again
-                  </Button>
-                </div>
-              )}
-              {!loading && !error && candidates.length === 0 && (
-                <div className="px-5 py-10 text-center">
-                  <p className="text-sm font-medium text-slate-800">No candidates found</p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Try changing your search or removing some filters.
-                  </p>
-                </div>
-              )}
-              {!loading && !error && candidates.length > 0 && (
-                <table className="min-w-full text-left text-sm">
-                  <thead className="sticky top-0 bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
-                    <tr>
-                      <th className="w-10 px-3 py-2">
-                        <input
-                          type="checkbox"
-                          aria-label="Select all visible candidates"
-                          checked={allVisibleSelected}
-                          onChange={toggleAllVisible}
-                        />
-                      </th>
-                      <th className="px-2 py-2 font-medium">Candidate</th>
-                      <th className="hidden px-2 py-2 font-medium md:table-cell">Current Role</th>
-                      <th className="hidden px-2 py-2 font-medium lg:table-cell">Location</th>
-                      <th className="hidden px-2 py-2 font-medium lg:table-cell">Experience</th>
-                      <th className="hidden px-2 py-2 font-medium xl:table-cell">Top Skills</th>
-                      <th className="hidden px-2 py-2 font-medium xl:table-cell">Tags</th>
-                      <th className="px-2 py-2 font-medium">Match</th>
-                      <th className="hidden px-2 py-2 font-medium sm:table-cell">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {candidates.map((c) => (
-                      <tr
-                        key={c.id}
-                        className={cn(
-                          "cursor-pointer hover:bg-slate-50",
-                          c.alreadyAdded && "bg-slate-50/70"
-                        )}
-                        onClick={() => setPreview(c)}
-                      >
-                        <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            aria-label={`Select ${c.fullName}`}
-                            disabled={c.alreadyAdded}
-                            checked={Boolean(selected[c.id])}
-                            onChange={(e) =>
-                              setSelected((prev) => ({
-                                ...prev,
-                                [c.id]: e.target.checked,
-                              }))
-                            }
-                          />
-                        </td>
-                        <td className="px-2 py-2.5">
-                          <div className="font-medium text-slate-900">{c.fullName}</div>
-                          <div className="text-xs text-slate-500 md:hidden">
-                            {c.currentRole || "—"}
-                          </div>
-                          {c.alreadyAdded && (
-                            <Badge tone="slate" className="mt-1">
-                              Already Added
-                            </Badge>
-                          )}
-                        </td>
-                        <td className="hidden px-2 py-2.5 text-slate-600 md:table-cell">
-                          {c.currentRole || "—"}
-                        </td>
-                        <td className="hidden px-2 py-2.5 text-slate-600 lg:table-cell">
-                          {c.location || "—"}
-                        </td>
-                        <td className="hidden px-2 py-2.5 text-slate-600 lg:table-cell">
-                          {c.yearsExperience != null ? `${c.yearsExperience} years` : "—"}
-                        </td>
-                        <td className="hidden max-w-[14rem] truncate px-2 py-2.5 text-xs text-slate-600 xl:table-cell">
-                          {c.topSkills.join(" · ") || "—"}
-                        </td>
-                        <td className="hidden max-w-[12rem] truncate px-2 py-2.5 text-xs text-slate-600 xl:table-cell">
-                          {c.tags.join(" · ") || "—"}
-                        </td>
-                        <td className="px-2 py-2.5">
-                          <Badge tone={scoreTone(c.matchScore)}>{c.matchScore}% Match</Badge>
-                        </td>
-                        <td className="hidden px-2 py-2.5 text-xs text-slate-600 sm:table-cell">
-                          {c.statusName || "—"}
-                        </td>
-                      </tr>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+                  <FilterSelect label="Role" value={role} onChange={setRole}>
+                    <option value="">All Roles</option>
+                    {(data?.suggestedRoles ?? []).map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
                     ))}
-                  </tbody>
-                </table>
-              )}
+                  </FilterSelect>
+                  <FilterSelect label="Location" value={location} onChange={setLocation}>
+                    <option value="">All locations</option>
+                    {(data?.facets.locations ?? []).map((loc) => (
+                      <option key={loc} value={loc}>
+                        {loc}
+                      </option>
+                    ))}
+                  </FilterSelect>
+                  <FilterSelect label="Experience" value={experience} onChange={setExperience}>
+                    <option value="">Any experience</option>
+                    <option value="under3">Under 3 years</option>
+                    <option value="3to5">3–5 years</option>
+                    <option value="5to10">5–10 years</option>
+                    <option value="10plus">10+ years</option>
+                  </FilterSelect>
+                  <FilterSelect label="Match Score" value={minMatch} onChange={setMinMatch}>
+                    {tab === "all" && <option value="0">Any match</option>}
+                    <option value="60">60%+ Possible</option>
+                    <option value="70">70%+ Good</option>
+                    <option value="80">80%+ Strong</option>
+                    <option value="90">90%+ Excellent</option>
+                  </FilterSelect>
+                  <FilterSelect label="Status" value={statusId} onChange={setStatusId}>
+                    <option value="">All statuses</option>
+                    {(data?.facets.statuses ?? []).map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </FilterSelect>
+                  <label className="block min-w-0">
+                    <span className="mb-0.5 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                      Previous title
+                    </span>
+                    <input
+                      className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-[13px] text-slate-800"
+                      placeholder="e.g. Product Lead"
+                      value={previousTitle}
+                      onChange={(e) => setPreviousTitle(e.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <ChipRow
+                    label="Skills"
+                    values={skills}
+                    suggestions={data?.suggestedSkills ?? []}
+                    onChange={setSkills}
+                    placeholder="Filter by skills"
+                  />
+                  <ChipRow
+                    label="Tags"
+                    values={tags}
+                    suggestions={data?.suggestedTags ?? []}
+                    onChange={setTags}
+                    placeholder="Filter by tags"
+                  />
+                </div>
+
+                {hasFilters && (
+                  <div>
+                    <Button type="button" variant="ghost" size="sm" onClick={clearFilters}>
+                      Clear Filters
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                {loading && (
+                  <p className="px-5 py-10 text-center text-sm text-slate-500">
+                    Searching candidates…
+                  </p>
+                )}
+                {!loading && error && (
+                  <div className="px-5 py-10 text-center">
+                    <p className="text-sm text-red-700">{error}</p>
+                    <Button className="mt-3" variant="secondary" size="sm" onClick={() => void load()}>
+                      Try again
+                    </Button>
+                  </div>
+                )}
+                {!loading && !error && candidates.length === 0 && (
+                  <div className="px-5 py-10 text-center">
+                    <p className="text-sm font-medium text-slate-800">No candidates found</p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Try changing your search or removing some filters.
+                    </p>
+                  </div>
+                )}
+                {!loading && !error && candidates.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-left text-sm">
+                      <thead className="sticky top-0 z-10 bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="w-10 px-3 py-2">
+                            <input
+                              type="checkbox"
+                              aria-label="Select all visible candidates"
+                              checked={allVisibleSelected}
+                              onChange={toggleAllVisible}
+                            />
+                          </th>
+                          <th className="px-2 py-2 font-medium">Candidate</th>
+                          <th className="hidden px-2 py-2 font-medium md:table-cell">Current Role</th>
+                          <th className="hidden px-2 py-2 font-medium lg:table-cell">Location</th>
+                          <th className="hidden px-2 py-2 font-medium lg:table-cell">Experience</th>
+                          <th className="hidden px-2 py-2 font-medium xl:table-cell">Top Skills</th>
+                          <th className="hidden px-2 py-2 font-medium xl:table-cell">Tags</th>
+                          <th className="px-2 py-2 font-medium">Match</th>
+                          <th className="hidden px-2 py-2 font-medium sm:table-cell">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {candidates.map((c) => (
+                          <tr
+                            key={c.id}
+                            className={cn(
+                              "cursor-pointer hover:bg-slate-50",
+                              c.alreadyAdded && "bg-slate-50/70"
+                            )}
+                            onClick={() => setPreview(c)}
+                          >
+                            <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${c.fullName}`}
+                                disabled={c.alreadyAdded}
+                                checked={Boolean(selected[c.id])}
+                                onChange={(e) =>
+                                  setSelected((prev) => ({
+                                    ...prev,
+                                    [c.id]: e.target.checked,
+                                  }))
+                                }
+                              />
+                            </td>
+                            <td className="px-2 py-2.5">
+                              <div className="font-medium text-slate-900">{c.fullName}</div>
+                              <div className="text-xs text-slate-500 md:hidden">
+                                {c.currentRole || "—"}
+                              </div>
+                              {c.alreadyAdded && (
+                                <Badge tone="slate" className="mt-1">
+                                  Already Added
+                                </Badge>
+                              )}
+                            </td>
+                            <td className="hidden px-2 py-2.5 text-slate-600 md:table-cell">
+                              {c.currentRole || "—"}
+                            </td>
+                            <td className="hidden px-2 py-2.5 text-slate-600 lg:table-cell">
+                              {c.location || "—"}
+                            </td>
+                            <td className="hidden px-2 py-2.5 text-slate-600 lg:table-cell">
+                              {c.yearsExperience != null ? `${c.yearsExperience} years` : "—"}
+                            </td>
+                            <td className="hidden max-w-[14rem] truncate px-2 py-2.5 text-xs text-slate-600 xl:table-cell">
+                              {c.topSkills.join(" · ") || "—"}
+                            </td>
+                            <td className="hidden max-w-[12rem] truncate px-2 py-2.5 text-xs text-slate-600 xl:table-cell">
+                              {c.tags.join(" · ") || "—"}
+                            </td>
+                            <td className="px-2 py-2.5">
+                              <Badge tone={scoreTone(c.matchScore)}>{c.matchScore}% Match</Badge>
+                            </td>
+                            <td className="hidden px-2 py-2.5 text-xs text-slate-600 sm:table-cell">
+                              {c.statusName || "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
-          </>
         )}
 
-        <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div className="flex shrink-0 flex-col gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="text-xs text-slate-500">
             {data && !preview && (
               <>

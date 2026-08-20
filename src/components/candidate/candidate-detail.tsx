@@ -26,7 +26,7 @@ import { AlternativeFitCard } from "@/components/candidate-match/alternative-fit
 import { ScoreExplanationPanel } from "@/components/candidate-match/score-explanation-panel";
 import { RecruiterSummaryCard } from "@/components/candidate-match/recruiter-summary-card";
 import { DataQualityPanel } from "@/components/candidate-match/data-quality-panel";
-import { DISPLAY_CATEGORY, DISPLAY_ACTION, type MatchCategory } from "@/lib/types";
+import { DISPLAY_CATEGORY, DISPLAY_ACTION, type AnalysisMode, type MatchCategory } from "@/lib/types";
 import { confidenceBand } from "@/lib/match-display";
 import { summarizeMandatory } from "@/lib/scoring";
 import type { AiResult } from "@/lib/schema";
@@ -38,6 +38,7 @@ import {
   ModelBadge,
   type ProviderAvailability,
 } from "@/components/workspace/ai-model-selector";
+import { AnalysisModeButtons } from "@/components/workspace/analysis-mode-buttons";
 import { useAiModelSelection } from "@/hooks/use-ai-model-selection";
 import { AnalysisProgressBar, stageFromEvent } from "@/components/workspace/analysis-progress";
 import {
@@ -177,6 +178,9 @@ export function CandidateDetail({
   const [savingCandidate, setSavingCandidate] = useState(false);
   const [reextracting, setReextracting] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [analysisBusyMode, setAnalysisBusyMode] = useState<AnalysisMode | null>(
+    null
+  );
   const [analysisStage, setAnalysisStage] = useState<{
     stage: AnalysisProgressStage;
     percent: number;
@@ -309,7 +313,10 @@ export function CandidateDetail({
     }
   }
 
-  async function reanalyze(duplicateConfirmation?: { token: string }) {
+  async function reanalyze(
+    analysisMode: AnalysisMode = "analyze",
+    duplicateConfirmation?: { token: string }
+  ) {
     if (!workspaceId) {
       toast("Attach this candidate to a job first.", "error");
       return;
@@ -323,6 +330,7 @@ export function CandidateDetail({
       return;
     }
     setReanalyzing(true);
+    setAnalysisBusyMode(analysisMode);
     setAnalysisStage({
       stage: "preparing",
       percent: STAGE_PROGRESS.preparing,
@@ -332,7 +340,7 @@ export function CandidateDetail({
       await analyzeCandidateWithDuplicateCheck({
         workspaceId,
         candidateId: candidate.id,
-        body: { ...requestBody, force_retry: true },
+        body: { ...requestBody, force_retry: true, analysis_mode: analysisMode },
         duplicateConfirmation,
         onProgress: (event) => {
           const mapped = stageFromEvent(event);
@@ -351,6 +359,7 @@ export function CandidateDetail({
       if (err instanceof DuplicateConfirmationNeededError && !duplicateConfirmation) {
         setAnalysisStage(null);
         setReanalyzing(false);
+        setAnalysisBusyMode(null);
         const continued = await new Promise<boolean>((resolve) => {
           duplicateResolverRef.current = resolve;
           setDuplicateDialog(err.duplicate);
@@ -358,7 +367,9 @@ export function CandidateDetail({
         duplicateResolverRef.current = null;
         setDuplicateDialog(null);
         if (continued) {
-          await reanalyze({ token: err.duplicate.duplicate_confirmation_token });
+          await reanalyze(analysisMode, {
+            token: err.duplicate.duplicate_confirmation_token,
+          });
         }
         return;
       }
@@ -372,6 +383,7 @@ export function CandidateDetail({
       toast(message, "error");
     } finally {
       setReanalyzing(false);
+      setAnalysisBusyMode(null);
       setAnalysisStage((prev) => (prev?.stage === "completed" ? prev : null));
     }
   }
@@ -745,9 +757,9 @@ export function CandidateDetail({
                   />
                 </div>
               )}
-              {cm && (
+              {cm?.recruiter_decision_summary?.trim() ? (
                 <p className="mt-2 text-sm text-slate-600">{cm.recruiter_decision_summary}</p>
-              )}
+              ) : null}
               {cm?.action_guidance?.trim() ? (
                 <p className="mt-1 text-sm text-slate-600">{cm.action_guidance}</p>
               ) : null}
@@ -759,13 +771,15 @@ export function CandidateDetail({
                 disabled={reanalyzing}
                 availability={availability}
               />
-              <Button onClick={() => reanalyze()} disabled={reanalyzing || !workspaceId}>
-                {reanalyzing
-                  ? analysisStage?.label ?? option.loadingLabel
-                  : analysis
-                    ? "Reanalyze"
-                    : "Analyze"}
-              </Button>
+              <AnalysisModeButtons
+                size="md"
+                layout="stack"
+                onSelect={(mode) => void reanalyze(mode)}
+                disabled={reanalyzing || !workspaceId}
+                busyMode={analysisBusyMode}
+                progressLabel={analysisStage?.label ?? option.loadingLabel}
+                hasAnalysis={Boolean(analysis)}
+              />
             </div>
           </CardBody>
         </Card>
@@ -824,9 +838,14 @@ export function CandidateDetail({
               onSaveVerification={saveVerification}
               savingRequirement={savingRequirement}
             />
-            <StrengthsCard strengths={r.strengths} />
-            <RisksCard risks={r.gaps_and_risks} />
-            <ExperienceAnalysisCard result={r} />
+            {r.strengths.length > 0 ? <StrengthsCard strengths={r.strengths} /> : null}
+            {r.gaps_and_risks.length > 0 ? <RisksCard risks={r.gaps_and_risks} /> : null}
+            {(r.experience_analysis.experience_calculation_notes.length > 0 ||
+              r.experience_analysis.total_professional_experience_years != null ||
+              r.experience_analysis.relevant_specialty_experience_years != null ||
+              r.experience_analysis.recent_relevant_experience_years != null) ? (
+              <ExperienceAnalysisCard result={r} />
+            ) : null}
             <div>
               <ScreeningQuestions
                 questions={r.screening_questions}
@@ -843,14 +862,18 @@ export function CandidateDetail({
             </div>
             <RecruiterSummaryCard result={r} />
             <AlternativeFitCard result={r} />
-            <ScoreExplanationPanel result={r} />
+            {(r.experience_analysis.experience_calculation_notes.length > 0 ||
+              r.strengths.length > 0 ||
+              r.gaps_and_risks.length > 0) ? (
+              <ScoreExplanationPanel result={r} />
+            ) : null}
             <DataQualityPanel result={r} scoreAdjustments={analysis?.score_adjustments ?? []} />
           </>
         ) : (
           <Card>
             <CardBody className="py-10 text-center text-sm text-slate-500">
               This candidate has not been analyzed yet. Review the extracted text on the right, then
-              run the analysis.
+              run Analyze or Deeper Analysis.
             </CardBody>
           </Card>
         )}

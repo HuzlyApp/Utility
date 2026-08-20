@@ -5,7 +5,8 @@ import { config } from "./config";
 import { PerformanceTimer } from "./ai/performance";
 import { getJobRequirementsCache } from "./ai/job-cache";
 import type { AiResult } from "./schema";
-import type { AnalyzeRequestBody } from "./types";
+import type { AnalyzeRequestBody, AnalysisMode } from "./types";
+import { DEFAULT_ANALYSIS_MODE, resolveAnalysisMode } from "./types";
 import type { AiModelOptionId, AiProvider } from "./ai";
 import { DEFAULT_AI_MODEL_OPTION } from "./ai";
 
@@ -16,6 +17,7 @@ export interface PerformAnalysisOptions {
   provider?: AiProvider;
   model?: string;
   optionId?: AiModelOptionId;
+  analysisMode?: AnalysisMode;
 }
 
 export interface PerformAnalysisResult {
@@ -44,6 +46,9 @@ export async function performAnalysis(
   // Grok analysis is disabled — match analysis always uses Claude.
   const provider: AiProvider = "claude";
   const optionId = meta?.optionId ?? DEFAULT_AI_MODEL_OPTION;
+  const analysisMode = resolveAnalysisMode(
+    meta?.analysisMode ?? input.analysis_mode ?? DEFAULT_ANALYSIS_MODE
+  );
 
   // Fetch or build cached job requirements to reduce prompt size for repeat jobs.
   const { cached: jobCache, hit: jobCacheHit } = await getJobRequirementsCache({
@@ -69,6 +74,7 @@ export async function performAnalysis(
       recruiter_notes: input.recruiter_notes,
       recent_experience_months: config.recentExperienceMonths,
       cached_job_requirements: jobCache,
+      analysisMode,
     },
     {
       analysisId: meta?.analysisId,
@@ -79,7 +85,10 @@ export async function performAnalysis(
 
   const timer = new PerformanceTimer();
   timer.start("scoring");
-  const { result: validatedResult, adjustments } = validateAndScore(ai.aiResult);
+  const { result: validatedResult, adjustments } = validateAndScore(
+    ai.aiResult,
+    { preserveAdvisoryOverallScore: analysisMode === "analyze" }
+  );
   timer.end("scoring");
 
   // Merge AI provider timings with application-side timings.

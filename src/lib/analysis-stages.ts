@@ -1,3 +1,5 @@
+import type { AnalysisMode } from "@/lib/types";
+
 /**
  * Real analysis processing stages (not a fake time-based percentage).
  * Percentages are derived from the current stage; AI work itself is indeterminate.
@@ -62,6 +64,10 @@ export interface AnalysisProgressEvent {
   code?: string;
 }
 
-export function analyzingMessage(modelLabel: string): string {
+export function analyzingMessage(
+  modelLabel: string,
+  mode?: AnalysisMode
+): string {
+  if (mode === "deep") return `Running deeper analysis with ${modelLabel}…`;
   return `Analyzing with ${modelLabel}…`;
 }

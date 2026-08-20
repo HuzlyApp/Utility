@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Badge, Button } from "@/components/ui/primitives";
 import { useToast } from "@/components/ui/toast";
-import { DISPLAY_CATEGORY, type MatchCategory } from "@/lib/types";
+import { DISPLAY_CATEGORY, type AnalysisMode, type MatchCategory } from "@/lib/types";
 import type { RankedCandidateRow } from "@/lib/dal/types";
 import {
   STAGE_LABEL,
@@ -23,6 +23,7 @@ import { onWorkspaceCandidatesChanged } from "@/lib/workspace-events";
 import { CompareDialog } from "./compare-dialog";
 import { DuplicateWarningDialog } from "./duplicate-warning-dialog";
 import { CandidateCard } from "./candidate-card";
+import { AnalysisModeButtons } from "./analysis-mode-buttons";
 import {
   AiModelSelector,
   ModelBadge,
@@ -149,6 +150,8 @@ export function RankingTable({
   >(null);
   const duplicateResolverRef = useRef<((continued: boolean) => void) | null>(null);
   const [progressById, setProgressById] = useState<Record<string, CandidateProgress>>({});
+  const [modeById, setModeById] = useState<Record<string, AnalysisMode>>({});
+  const [batchMode, setBatchMode] = useState<AnalysisMode | null>(null);
   const inFlightRef = useRef<Set<string>>(new Set());
   const [, setInFlightTick] = useState(0);
   const analyzingSinceRef = useRef<Record<string, number>>({});
@@ -367,12 +370,14 @@ export function RankingTable({
 
   async function analyzeOne(
     candidateId: string,
-    duplicateConfirmation?: { token: string }
+    options?: { token?: string; analysisMode?: AnalysisMode }
   ): Promise<boolean> {
+    const analysisMode = options?.analysisMode ?? "analyze";
     const priorStatus =
       rows.find((r) => r.candidate_id === candidateId)?.status ?? "READY";
 
     markInFlight(candidateId, true);
+    setModeById((prev) => ({ ...prev, [candidateId]: analysisMode }));
     setCandidateProgress(candidateId, {
       stage: "preparing",
       progress: STAGE_PROGRESS.preparing,
@@ -390,11 +395,14 @@ export function RankingTable({
         candidateId,
         body: {
           ...requestBody,
+          analysis_mode: analysisMode,
           ...(row?.status === "FAILED" || row?.status === "ANALYZING"
             ? { force_retry: true }
             : {}),
         },
-        duplicateConfirmation,
+        duplicateConfirmation: options?.token
+          ? { token: options.token }
+          : undefined,
         onProgress: (event) => {
           setCandidateProgress(candidateId, event);
           if (event.stage === "completed") {
@@ -422,7 +430,7 @@ export function RankingTable({
     } catch (err) {
       if (
         err instanceof DuplicateConfirmationNeededError &&
-        !duplicateConfirmation
+        !options?.token
       ) {
         setRows((prev) =>
           prev.map((r) =>
@@ -458,6 +466,7 @@ export function RankingTable({
 
         return analyzeOne(candidateId, {
           token: err.duplicate.duplicate_confirmation_token,
+          analysisMode,
         });
       }
 
@@ -479,6 +488,11 @@ export function RankingTable({
       return false;
     } finally {
       markInFlight(candidateId, false);
+      setModeById((prev) => {
+        const next = { ...prev };
+        delete next[candidateId];
+        return next;
+      });
     }
   }
 
@@ -498,7 +512,10 @@ export function RankingTable({
     duplicateResolverRef.current?.(false);
   }
 
-  async function analyzeSingle(candidateId: string) {
+  async function analyzeSingle(
+    candidateId: string,
+    analysisMode: AnalysisMode = "analyze"
+  ) {
     if (inFlightRef.current.has(candidateId)) return;
     if (availability && !availability[option.provider]?.available) {
       toast(
@@ -508,7 +525,7 @@ export function RankingTable({
       return;
     }
 
-    const ok = await analyzeOne(candidateId);
+    const ok = await analyzeOne(candidateId, { analysisMode });
     await refresh();
     router.refresh();
     setProgressById((prev) => {
@@ -519,7 +536,7 @@ export function RankingTable({
     if (ok) toast("Analysis completed", "success");
   }
 
-  async function analyzeAllReady() {
+  async function analyzeAllReady(analysisMode: AnalysisMode = "analyze") {
     const selectedProvider = option.provider;
     if (availability && !availability[selectedProvider]?.available) {
       toast(
@@ -540,6 +557,7 @@ export function RankingTable({
     }
 
     setBatchRunning(true);
+    setBatchMode(analysisMode);
     setProgressById({});
 
     const concurrency = 2;
@@ -549,7 +567,7 @@ export function RankingTable({
     async function worker() {
       while (index < ready.length) {
         const current = ready[index++];
-        const ok = await analyzeOne(current.candidate_id);
+        const ok = await analyzeOne(current.candidate_id, { analysisMode });
         if (!ok) failures += 1;
       }
     }
@@ -558,6 +576,7 @@ export function RankingTable({
       Array.from({ length: Math.min(concurrency, ready.length) }, () => worker())
     );
     setBatchRunning(false);
+    setBatchMode(null);
     await refresh();
     router.refresh();
     setProgressById({});
@@ -666,10 +685,19 @@ export function RankingTable({
           disabled={batchRunning}
           availability={availability}
         />
-        <Button onClick={analyzeAllReady} disabled={batchRunning}>
-          {batchRunning
+        <Button onClick={() => void analyzeAllReady("analyze")} disabled={batchRunning}>
+          {batchRunning && batchMode !== "deep"
             ? `${option.loadingLabel.replace(/…$/, "")} ${aggregatePercent}%`
             : "Analyze All Ready Candidates"}
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => void analyzeAllReady("deep")}
+          disabled={batchRunning}
+        >
+          {batchRunning && batchMode === "deep"
+            ? `Deeper analysis ${aggregatePercent}%`
+            : "Deeper Analysis All Ready"}
         </Button>
         <span className="text-xs text-slate-500">
           Using <span className="font-medium text-slate-700">{option.label}</span>
@@ -897,22 +925,16 @@ export function RankingTable({
                   </td>
                   <td className="px-2 py-2">
                     <div className="flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => analyzeSingle(r.candidate_id)}
+                      <AnalysisModeButtons
+                        onSelect={(mode) => void analyzeSingle(r.candidate_id, mode)}
                         disabled={rowBusy || batchRunning}
-                      >
-                        {rowBusy
-                          ? rowProgress
-                            ? `${rowProgress.percent}%`
-                            : "…"
-                          : r.status === "FAILED"
-                            ? "Retry"
-                            : r.latest_analysis_id
-                              ? "Reanalyze"
-                              : "Analyze"}
-                      </Button>
+                        busyMode={rowBusy ? modeById[r.candidate_id] ?? "analyze" : null}
+                        progressLabel={
+                          rowProgress ? `${rowProgress.percent}%` : undefined
+                        }
+                        hasAnalysis={Boolean(r.latest_analysis_id)}
+                        failed={r.status === "FAILED"}
+                      />
                       <Button
                         size="sm"
                         variant="secondary"
@@ -963,10 +985,11 @@ export function RankingTable({
               selected={!!selected[r.candidate_id]}
               progress={rowProgress}
               busy={rowBusy}
+              busyMode={rowBusy ? modeById[r.candidate_id] ?? "analyze" : null}
               batchRunning={batchRunning}
               retryingContact={retryingContactId === r.candidate_id}
               onToggleSelect={toggleSelect}
-              onAnalyze={(id) => void analyzeSingle(id)}
+              onAnalyze={(id, mode) => void analyzeSingle(id, mode)}
               onOpenNotes={(id, name) =>
                 setNotesFor({ candidateId: id, candidateName: name })
               }

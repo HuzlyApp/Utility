@@ -31,6 +31,12 @@ describe("import candidates feature contracts", () => {
     expect(modal).toContain("/api/workspaces/${workspaceId}/candidates/import");
     expect(modal).toContain("candidateIds");
     expect(modal).toContain("notifyWorkspaceCandidatesChanged");
+    expect(modal).toContain("sm:max-h-[calc(100dvh-32px)]");
+    expect(modal).toContain("sm:w-[min(1200px,calc(100vw-32px))]");
+    expect(modal).toContain("overflow-y-auto");
+    expect(modal).toContain("overscroll-contain");
+    expect(modal).toContain("xl:grid-cols-6");
+    expect(modal).toContain("overflow-x-auto");
   });
 
   it("searches the full tenant candidate database server-side with pagination", () => {

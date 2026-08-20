@@ -18,6 +18,7 @@ import { resolveAiSelection } from "@/lib/ai";
 import { hashUploadBuffers } from "@/lib/duplicate-candidate/find-duplicates";
 import { audit } from "@/lib/dal/audit";
 import type { AnalyzeRequestBody } from "@/lib/types";
+import { resolveAnalysisMode } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -158,6 +159,7 @@ export async function POST(
       const selection = resolveAiSelection({
         ai_model_option: form.get("ai_model_option"),
       });
+      const analysisMode = resolveAnalysisMode(form.get("analysis_mode"));
       const input: AnalyzeRequestBody = {
         job_id: workspace.job_ref ?? undefined,
         job_title: workspace.job_title ?? undefined,
@@ -178,6 +180,7 @@ export async function POST(
           candidate_name: candidate.full_name ?? undefined,
         },
         recruiter_notes: candidate.recruiter_notes ?? undefined,
+        analysis_mode: analysisMode,
       };
 
       const startedAt = Date.now();
@@ -187,6 +190,7 @@ export async function POST(
         provider: selection.provider,
         model: selection.model,
         optionId: selection.optionId,
+        analysisMode,
       });
 
       await setJobCandidateStatus(user, jmc.id, "VALIDATING");

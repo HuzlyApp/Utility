@@ -8,6 +8,11 @@ import {
   EVIDENCE_SOURCES,
   COMPLETENESS_LEVELS,
   SUBMISSION_READINESS,
+  DISPLAY_CATEGORY,
+  type AnalysisMode,
+  type EvidenceStatus,
+  type RequirementOutcome,
+  type RequirementType,
 } from "./types";
 import { labeledItemFromUnknown } from "./match-display";
 
@@ -122,22 +127,227 @@ export const aiResultSchema = z.object({
 
 export type AiResult = z.infer<typeof aiResultSchema>;
 
+const leanRequirementSchema = z
+  .object({
+    requirement: z.string().min(1),
+    status: z.enum(EVIDENCE_STATUSES),
+    evidence: z.string().default(""),
+  })
+  .superRefine((val, ctx) => {
+    if (val.status === "CONFIRMED" && val.evidence.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A CONFIRMED requirement must include evidence.",
+        path: ["evidence"],
+      });
+    }
+  });
+
+const leanScreeningQuestionSchema = z.union([
+  z.string().min(1),
+  z.object({
+    question: z.string().min(1),
+    priority: z.number().optional(),
+    reason: z.string().optional(),
+    related_requirement: z.string().optional(),
+  }),
+]);
+
+export const analyzeLeanResultSchema = z.object({
+  recommended_overall_match_score: score0to100,
+  match_category: z.enum(MATCH_CATEGORIES),
+  recommended_action: z.enum(RECOMMENDED_ACTIONS),
+  mandatory_requirements: z.array(leanRequirementSchema).default([]),
+  preferred_requirements: z.array(leanRequirementSchema).default([]),
+  screening_questions: z.array(leanScreeningQuestionSchema).max(4).default([]),
+  items_to_verify: z.array(z.string()).default([]),
+  blocking_requirements: z.array(z.string()).default([]),
+});
+
+export type AnalyzeLeanResult = z.infer<typeof analyzeLeanResultSchema>;
+
+function outcomeFromStatus(status: EvidenceStatus): RequirementOutcome {
+  if (status === "NOT_APPLICABLE") return "NOT_APPLICABLE";
+  if (status === "CONFLICTING") return "CONFLICT";
+  if (status === "CONFIRMED") return "MET";
+  return "VERIFY";
+}
+
+function confidenceFromStatus(status: EvidenceStatus): number {
+  if (status === "CONFIRMED") return 80;
+  if (status === "PARTIAL") return 55;
+  if (status === "CONFLICTING") return 40;
+  if (status === "NOT_APPLICABLE") return 100;
+  return 30;
+}
+
+function liftLeanRequirement(
+  item: z.infer<typeof leanRequirementSchema>,
+  requirementType: RequirementType
+) {
+  return {
+    requirement: item.requirement,
+    requirement_type: requirementType,
+    status: item.status,
+    requirement_outcome: outcomeFromStatus(item.status),
+    candidate_evidence: item.evidence,
+    evidence_source: item.evidence.trim() ? ("RESUME" as const) : ("NONE" as const),
+    impact: "",
+    verification_required: item.status !== "CONFIRMED" && item.status !== "NOT_APPLICABLE",
+    confidence: confidenceFromStatus(item.status),
+  };
+}
+
+function isLeanAnalyzeShape(json: unknown): boolean {
+  if (!json || typeof json !== "object" || Array.isArray(json)) return false;
+  const record = json as Record<string, unknown>;
+  return (
+    "recommended_overall_match_score" in record &&
+    !("candidate_match" in record)
+  );
+}
+
+export function liftLeanResultToAiResult(lean: AnalyzeLeanResult): AiResult {
+  const score = lean.recommended_overall_match_score;
+  const chronoItems = lean.items_to_verify.filter((item) =>
+    /chronolog|anachron|before known product|feature claimed before/i.test(item)
+  );
+  const applicable = lean.mandatory_requirements.filter(
+    (r) => r.status !== "NOT_APPLICABLE"
+  );
+  const confirmed = applicable.filter((r) => r.status === "CONFIRMED").length;
+  const confidence =
+    applicable.length === 0
+      ? 70
+      : Math.round(40 + (60 * confirmed) / applicable.length);
+
+  return aiResultSchema.parse({
+    analysis_version: "1.0",
+    job: {
+      job_id: "",
+      job_title: "",
+      msp_or_client: "",
+      specialty: "",
+      location: "",
+    },
+    candidate_match: {
+      recommended_overall_match_score: score,
+      match_category: lean.match_category,
+      display_category: DISPLAY_CATEGORY[lean.match_category],
+      confidence_score: confidence,
+      mandatory_requirement_override:
+        lean.match_category === "NOT_CURRENTLY_SUBMITTABLE" ||
+        lean.blocking_requirements.length > 0,
+      recommended_action: lean.recommended_action,
+      recruiter_decision_summary: "",
+      submission_note: "",
+      action_guidance: "",
+    },
+    subscores: {
+      mandatory_requirements_score: score,
+      specialty_experience_score: score,
+      clinical_skills_score: score,
+      licenses_certifications_score: score,
+      work_setting_equipment_score: score,
+      preferred_qualifications_score: score,
+    },
+    experience_analysis: {
+      total_professional_experience_years: null,
+      relevant_specialty_experience_years: null,
+      recent_relevant_experience_years: null,
+      travel_experience_confirmed: false,
+      required_work_setting_experience_confirmed: false,
+      is_estimated: false,
+      experience_calculation_notes: [],
+    },
+    mandatory_requirements: lean.mandatory_requirements.map((r) =>
+      liftLeanRequirement(r, "MANDATORY")
+    ),
+    preferred_requirements: lean.preferred_requirements.map((r) =>
+      liftLeanRequirement(r, "PREFERRED")
+    ),
+    strengths: [],
+    gaps_and_risks: [],
+    screening_questions: lean.screening_questions.map((q, i) =>
+      typeof q === "string"
+        ? {
+            priority: i + 1,
+            question: q,
+            reason: "",
+            related_requirement: "",
+          }
+        : {
+            priority: q.priority ?? i + 1,
+            question: q.question,
+            reason: q.reason ?? "",
+            related_requirement: q.related_requirement ?? "",
+          }
+    ),
+    submission_readiness: {
+      ready_to_submit: false,
+      readiness_status:
+        lean.blocking_requirements.length > 0
+          ? "NOT_CURRENTLY_SUBMITTABLE"
+          : "VERIFY_BEFORE_SUBMISSION",
+      items_to_verify_before_submission: lean.items_to_verify,
+      documents_or_credentials_needed: [],
+      blocking_requirements: lean.blocking_requirements,
+    },
+    alternative_fit: {
+      redirect_recommended: false,
+      redirect_reason: "",
+      possible_job_types: [],
+    },
+    data_quality: {
+      resume_completeness: "HIGH",
+      job_description_completeness: "HIGH",
+      job_description_conflicts: [],
+      resume_conflicts: chronoItems,
+      missing_information: [],
+    },
+  });
+}
+
 // Parse + validate raw model text. Returns a discriminated result so callers can
 // decide whether to trigger a JSON-repair retry.
 export function parseAiResult(
-  raw: string
+  raw: string,
+  mode: AnalysisMode = "deep"
 ):
   | { ok: true; data: AiResult }
   | { ok: false; error: string; parsedJson?: unknown } {
   let json: unknown;
   try {
-    json = normalizeParsedJson(JSON.parse(stripCodeFences(raw)));
+    json = normalizeParsedJson(JSON.parse(stripCodeFences(raw)), mode);
   } catch (err) {
     return {
       ok: false,
       error: `Response was not valid JSON: ${(err as Error).message}`,
     };
   }
+
+  if (mode === "analyze" && isLeanAnalyzeShape(json)) {
+    const lean = analyzeLeanResultSchema.safeParse(json);
+    if (!lean.success) {
+      return {
+        ok: false,
+        error: lean.error.issues
+          .map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join("; "),
+        parsedJson: json,
+      };
+    }
+    try {
+      return { ok: true, data: liftLeanResultToAiResult(lean.data) };
+    } catch (err) {
+      return {
+        ok: false,
+        error: `Lean analysis could not be normalized: ${(err as Error).message}`,
+        parsedJson: json,
+      };
+    }
+  }
+
   const result = aiResultSchema.safeParse(json);
   if (!result.success) {
     return {
@@ -151,11 +361,15 @@ export function parseAiResult(
   return { ok: true, data: result.data };
 }
 
-function normalizeParsedJson(json: unknown): unknown {
+function normalizeParsedJson(json: unknown, mode: AnalysisMode = "deep"): unknown {
   if (!json || typeof json !== "object" || Array.isArray(json)) return json;
   const record = json as Record<string, unknown>;
-  if (Array.isArray(record.screening_questions) && record.screening_questions.length > 10) {
-    return { ...record, screening_questions: record.screening_questions.slice(0, 10) };
+  const maxQuestions = mode === "analyze" ? 4 : 10;
+  if (
+    Array.isArray(record.screening_questions) &&
+    record.screening_questions.length > maxQuestions
+  ) {
+    return { ...record, screening_questions: record.screening_questions.slice(0, maxQuestions) };
   }
   return json;
 }

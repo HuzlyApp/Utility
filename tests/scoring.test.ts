@@ -270,4 +270,25 @@ describe("mandatory gap score caps", () => {
     expect(result.candidate_match.match_category).toBe("WEAK_MATCH");
     expect(adjustments.join(" ")).toContain("technology-timeline");
   });
+
+  it("preserves the advisory overall score and knockout for lean Analyze results", () => {
+    const ai = makeAiResult({
+      candidate_match: {
+        ...makeAiResult().candidate_match,
+        recommended_overall_match_score: 68,
+        match_category: "NOT_CURRENTLY_SUBMITTABLE",
+        recommended_action: "STOP_FOR_THIS_JOB",
+      },
+      submission_readiness: {
+        ...makeAiResult().submission_readiness,
+        blocking_requirements: ["Active RN license"],
+      },
+    });
+    const { result } = validateAndScore(ai, { preserveAdvisoryOverallScore: true });
+    expect(result.candidate_match.match_category).toBe("NOT_CURRENTLY_SUBMITTABLE");
+    expect(result.submission_readiness.readiness_status).toBe(
+      "NOT_CURRENTLY_SUBMITTABLE"
+    );
+    expect(result.candidate_match.recommended_overall_match_score).toBe(68);
+  });
 });

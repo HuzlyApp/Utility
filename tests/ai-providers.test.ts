@@ -88,6 +88,7 @@ import { analyzeCandidate } from "@/lib/ai/analyze-candidate";
 import { resolveAiSelection, getProviderAvailability } from "@/lib/ai/selection";
 import { parseAiResult } from "@/lib/schema";
 import { ProviderUnavailableError } from "@/lib/ai/errors";
+import { ANALYZE_SYSTEM_PROMPT, DEEP_ANALYSIS_SYSTEM_PROMPT } from "@/lib/prompt";
 
 const baseArgs = {
   job_description_text: "Need CT tech with ARRT(CT).",
@@ -151,6 +152,51 @@ describe("AI model selection routing", () => {
       model: "claude-sonnet-4-5-20250929",
       optionId: "claude",
     });
+  });
+
+  it("uses the lean Analyze prompt by default", async () => {
+    claudeComplete.mockResolvedValue({
+      content: JSON.stringify(makeAiResult()),
+      model: "claude-sonnet-4-5-20250929",
+    });
+
+    await analyzeCandidate({
+      ...baseArgs,
+      provider: "claude",
+      optionId: "claude",
+    });
+
+    const messages = claudeComplete.mock.calls[0][0] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(messages[0]?.role).toBe("system");
+    expect(messages[0]?.content).toBe(ANALYZE_SYSTEM_PROMPT);
+    expect(messages[1]?.content).toContain("items_to_verify");
+    expect(messages[1]?.content).not.toContain("recruiter_decision_summary");
+  });
+
+  it("uses the existing detailed prompt only for Deeper Analysis", async () => {
+    claudeComplete.mockResolvedValue({
+      content: JSON.stringify(makeAiResult()),
+      model: "claude-sonnet-4-5-20250929",
+    });
+
+    await analyzeCandidate({
+      ...baseArgs,
+      provider: "claude",
+      optionId: "claude",
+      analysisMode: "deep",
+    });
+
+    const messages = claudeComplete.mock.calls[0][0] as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(messages[0]?.content).toBe(DEEP_ANALYSIS_SYSTEM_PROMPT);
+    expect(messages[1]?.content).toContain("Required JSON structure");
+    expect(messages[1]?.content).toContain("analysis_version");
+    expect(messages[1]?.content).toContain("recruiter_decision_summary");
   });
 });
 

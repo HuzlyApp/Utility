@@ -14,6 +14,7 @@ import {
 import { ok, fail, logServerError, logOperational } from "@/lib/http";
 import { summarizeMandatory } from "@/lib/scoring";
 import type { AnalyzeRequestBody } from "@/lib/types";
+import { resolveAnalysisMode } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -52,6 +53,7 @@ export async function POST(req: NextRequest) {
     }
 
     const selection = resolveAiSelection(body);
+    const analysisMode = resolveAnalysisMode(body.analysis_mode);
 
     const input: AnalyzeRequestBody = {
       job_id: body.job_id,
@@ -62,6 +64,7 @@ export async function POST(req: NextRequest) {
       resume_text: body.resume_text,
       verified_recruiter_inputs: body.verified_recruiter_inputs,
       recruiter_notes: body.recruiter_notes,
+      analysis_mode: analysisMode,
     };
 
     const startedAt = Date.now();
@@ -69,6 +72,7 @@ export async function POST(req: NextRequest) {
       provider: selection.provider,
       model: selection.model,
       optionId: selection.optionId,
+      analysisMode,
     });
 
     let analysisId: string | null = null;

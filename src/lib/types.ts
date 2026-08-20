@@ -21,6 +21,18 @@ export const RECOMMENDED_ACTIONS = [
 ] as const;
 export type RecommendedAction = (typeof RECOMMENDED_ACTIONS)[number];
 
+export const ANALYSIS_MODES = ["analyze", "deep"] as const;
+export type AnalysisMode = (typeof ANALYSIS_MODES)[number];
+export const DEFAULT_ANALYSIS_MODE: AnalysisMode = "analyze";
+
+export function isAnalysisMode(value: unknown): value is AnalysisMode {
+  return value === "analyze" || value === "deep";
+}
+
+export function resolveAnalysisMode(value: unknown): AnalysisMode {
+  return isAnalysisMode(value) ? value : DEFAULT_ANALYSIS_MODE;
+}
+
 // Recruiter-selected final disposition (kept separate from AI recommendation).
 export const RECRUITER_DISPOSITIONS = [
   "PROCEED_TO_SCREENING",
@@ -183,4 +195,6 @@ export interface AnalyzeRequestBody {
   resume_text: string;
   verified_recruiter_inputs?: VerifiedRecruiterInputs;
   recruiter_notes?: string;
+  /** Lean "analyze" vs existing detailed "deep" analysis. Defaults to analyze. */
+  analysis_mode?: AnalysisMode;
 }

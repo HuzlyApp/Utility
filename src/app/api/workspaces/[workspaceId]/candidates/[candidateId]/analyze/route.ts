@@ -27,6 +27,7 @@ import {
   AI_MODEL_OPTIONS,
 } from "@/lib/ai";
 import type { AnalyzeRequestBody } from "@/lib/types";
+import { resolveAnalysisMode } from "@/lib/types";
 import {
   analyzingMessage,
   progressForStage,
@@ -159,6 +160,7 @@ export async function POST(
     }
 
     const selection = resolveAiSelection(body);
+    const analysisMode = resolveAnalysisMode(body.analysis_mode);
     const label = modelLabel(selection.optionId);
     const encoder = new TextEncoder();
 
@@ -316,7 +318,7 @@ export async function POST(
           }
 
           send(
-            progressEvent("analyzing", analyzingMessage(label), {
+            progressEvent("analyzing", analyzingMessage(label, analysisMode), {
               candidate_id: params.candidateId,
               ai_provider: selection.provider,
               ai_model: selection.model,
@@ -351,6 +353,7 @@ export async function POST(
               candidate_name: candidate.full_name ?? undefined,
             },
             recruiter_notes: candidate.recruiter_notes ?? undefined,
+            analysis_mode: analysisMode,
           };
 
           const analysis = await performAnalysis(input, {
@@ -359,6 +362,7 @@ export async function POST(
             provider: selection.provider,
             model: selection.model,
             optionId: selection.optionId,
+            analysisMode,
           });
 
           send(
@@ -415,6 +419,7 @@ export async function POST(
             stage: "completed",
             provider: analysis.provider,
             model: analysis.model,
+            analysis_mode: analysisMode,
             duration_ms: analysis.perf?.total_duration_ms,
             claude_generation_ms: analysis.perf?.claude_generation_ms,
             repair_attempted: analysis.repaired,

@@ -1,6 +1,7 @@
 import type { AiResult } from "@/lib/schema";
 import type { UserPromptArgs } from "@/lib/prompt";
 import type { NormalizedJobRequirements } from "@/lib/job-cache";
+import type { AnalysisMode } from "@/lib/types";
 export type { NormalizedJobRequirements } from "@/lib/job-cache";
 
 /** Supported AI providers for candidate-to-job matching. */
@@ -102,6 +103,7 @@ export interface AnalysisCallMeta {
   jobCharCount: number;
   provider: AiProvider;
   model: string;
+  analysisMode?: AnalysisMode;
 }
 
 export interface AnalyzeCandidateArgs extends UserPromptArgs {
@@ -109,6 +111,8 @@ export interface AnalyzeCandidateArgs extends UserPromptArgs {
   /** Optional concrete model override; otherwise provider default from config. */
   model?: string;
   optionId?: AiModelOptionId;
+  /** Lean Analyze vs existing Deeper Analysis. Defaults to analyze. */
+  analysisMode?: AnalysisMode;
   /** Cached normalized job requirements to reduce prompt size. */
   cached_job_requirements?: import("@/lib/ai/job-cache").CachedJobRequirements;
 }

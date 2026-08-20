@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { config } from "@/lib/config";
 import { parseAiResult } from "@/lib/schema";
-import { SYSTEM_PROMPT } from "@/lib/prompt";
+import { SYSTEM_PROMPT, ANALYZE_SYSTEM_PROMPT, DEEP_ANALYSIS_SYSTEM_PROMPT, systemPromptForMode } from "@/lib/prompt";
 import { makeAiResult } from "./fixtures";
 
 describe("Grok AI Integration", () => {
@@ -60,6 +60,28 @@ describe("Grok AI Integration", () => {
       expect(SYSTEM_PROMPT).toContain("Return valid JSON only");
       expect(SYSTEM_PROMPT).toContain("Do not include markdown");
       expect(SYSTEM_PROMPT).toContain("Do not include markdown, commentary, code fences");
+    });
+  });
+
+  describe("Analyze vs Deeper Analysis prompts", () => {
+    it("keeps the existing detailed prompt as Deeper Analysis", () => {
+      expect(DEEP_ANALYSIS_SYSTEM_PROMPT).toBe(SYSTEM_PROMPT);
+      expect(DEEP_ANALYSIS_SYSTEM_PROMPT).toContain("REQUIRED NARRATIVE BLOCKS");
+    });
+
+    it("uses a leaner prompt for Analyze", () => {
+      expect(ANALYZE_SYSTEM_PROMPT).toContain(
+        "You are an expert staffing matching analyst"
+      );
+      expect(ANALYZE_SYSTEM_PROMPT).toContain("items_to_verify");
+      expect(ANALYZE_SYSTEM_PROMPT).toContain("blocking_requirements");
+      expect(ANALYZE_SYSTEM_PROMPT).not.toContain("REQUIRED NARRATIVE BLOCKS");
+      expect(ANALYZE_SYSTEM_PROMPT).toContain("Do NOT include: experience calculation");
+    });
+
+    it("selects prompts by analysis mode", () => {
+      expect(systemPromptForMode("analyze")).toBe(ANALYZE_SYSTEM_PROMPT);
+      expect(systemPromptForMode("deep")).toBe(DEEP_ANALYSIS_SYSTEM_PROMPT);
     });
   });
 
