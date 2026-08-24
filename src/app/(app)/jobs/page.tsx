@@ -5,9 +5,14 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { listWorkspaces } from "@/lib/dal/workspaces";
 import { JobSearchInput } from "@/components/dashboard/job-search-input";
 import { JobWorkspaceSections } from "@/components/dashboard/job-workspace-sections";
+import { JobSortSelect } from "@/components/dashboard/job-sort-select";
 import { parseJobStatusParam, jobRoutes } from "@/lib/routes";
 import { normalizeSearchQuery } from "@/lib/candidate-crm";
-import { splitWorkspaces } from "@/lib/workspace-lists";
+import {
+  parseJobSortDirParam,
+  parseJobSortParam,
+  splitWorkspaces,
+} from "@/lib/workspace-lists";
 import { cn } from "@/lib/cn";
 
 export const dynamic = "force-dynamic";
@@ -21,16 +26,20 @@ const STATUS_TABS = [
 export default async function JobsListPage({
   searchParams,
 }: {
-  searchParams: { status?: string; q?: string };
+  searchParams: { status?: string; q?: string; sort?: string; dir?: string };
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
   const status = parseJobStatusParam(searchParams.status);
   const search = normalizeSearchQuery(searchParams.q);
+  const sort = parseJobSortParam(searchParams.sort);
+  const dir = parseJobSortDirParam(searchParams.dir);
   const workspaces = await listWorkspaces(user, {
     includeArchived: true,
     search: search || undefined,
+    sort,
+    dir,
   });
   const { active, archived } = splitWorkspaces(workspaces);
 
@@ -61,7 +70,12 @@ export default async function JobsListPage({
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Job status filter">
         {STATUS_TABS.map((tab) => {
           const selected = status === tab.value;
-          const href = jobRoutes.list({ status: tab.value, q: search || undefined });
+          const href = jobRoutes.list({
+            status: tab.value,
+            q: search || undefined,
+            sort,
+            dir,
+          });
           return (
             <Link
               key={tab.value}
@@ -81,9 +95,14 @@ export default async function JobsListPage({
         })}
       </div>
 
-      <Suspense fallback={null}>
-        <JobSearchInput initialQuery={search} />
-      </Suspense>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <Suspense fallback={null}>
+          <JobSearchInput initialQuery={search} className="w-full sm:flex-1" />
+        </Suspense>
+        <Suspense fallback={null}>
+          <JobSortSelect />
+        </Suspense>
+      </div>
 
       <JobWorkspaceSections
         active={active}
@@ -91,7 +110,8 @@ export default async function JobsListPage({
         searchQuery={search}
         showActive={status !== "archived"}
         showArchived
-        clearSearchHref={jobRoutes.list({ status })}
+        dateField={sort === "created" ? "created_at" : "updated_at"}
+        clearSearchHref={jobRoutes.list({ status, sort, dir })}
       />
     </div>
   );

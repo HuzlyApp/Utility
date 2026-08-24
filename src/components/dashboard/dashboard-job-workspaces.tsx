@@ -3,22 +3,51 @@
 import Link from "next/link";
 import { Suspense, useState } from "react";
 import { JobSearchInput } from "@/components/dashboard/job-search-input";
+import { JobSortSelect } from "@/components/dashboard/job-sort-select";
 import { JobTiles } from "@/components/dashboard/job-tiles";
 import { ArchivedJobsSection } from "@/components/dashboard/job-workspace-sections";
-import { dashboardStatRoutes, jobRoutes } from "@/lib/routes";
-import { splitWorkspaces } from "@/lib/workspace-lists";
+import { jobRoutes } from "@/lib/routes";
+import {
+  splitWorkspaces,
+  type JobSortDir,
+  type JobSortKey,
+} from "@/lib/workspace-lists";
 import type { WorkspaceSummary } from "@/lib/dal/types";
 import { cn } from "@/lib/cn";
+
+function dashboardJobsHref(opts: {
+  q?: string;
+  sort?: JobSortKey;
+  dir?: JobSortDir;
+}): string {
+  const params = new URLSearchParams();
+  if (opts.q) params.set("q", opts.q);
+  if (opts.sort && opts.sort !== "updated") params.set("sort", opts.sort);
+  if (opts.dir && opts.dir !== "desc") params.set("dir", opts.dir);
+  const qs = params.toString();
+  return qs ? `/dashboard?${qs}` : "/dashboard";
+}
 
 export function DashboardJobWorkspaces({
   workspaces,
   searchQuery,
+  dateField = "updated_at",
+  sort = "updated",
+  dir = "desc",
 }: {
   workspaces: WorkspaceSummary[];
   searchQuery: string;
+  dateField?: "updated_at" | "created_at";
+  sort?: JobSortKey;
+  dir?: JobSortDir;
 }) {
   const [searchPending, setSearchPending] = useState(false);
   const { active, archived } = splitWorkspaces(workspaces);
+  const viewAllHref = jobRoutes.list({
+    status: "active",
+    sort,
+    dir,
+  });
 
   return (
     <section>
@@ -26,7 +55,7 @@ export function DashboardJobWorkspaces({
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-slate-700">Job Workspaces</h2>
           <Link
-            href={dashboardStatRoutes.activeJobs}
+            href={viewAllHref}
             className="shrink-0 text-xs font-medium text-brand-600 hover:underline sm:hidden"
           >
             View all
@@ -45,8 +74,15 @@ export function DashboardJobWorkspaces({
               onPendingChange={setSearchPending}
             />
           </Suspense>
+          <Suspense
+            fallback={
+              <div className="h-10 w-full animate-pulse rounded-lg bg-slate-100 sm:w-56" />
+            }
+          >
+            <JobSortSelect className="w-full sm:w-56" />
+          </Suspense>
           <Link
-            href={dashboardStatRoutes.activeJobs}
+            href={viewAllHref}
             className="hidden shrink-0 text-xs font-medium text-brand-600 hover:underline sm:inline"
           >
             View all
@@ -74,6 +110,7 @@ export function DashboardJobWorkspaces({
         <div className="space-y-8">
           <JobTiles
             workspaces={active}
+            dateField={dateField}
             emptyMessage={
               searchQuery ? "No job workspaces match your search." : undefined
             }
@@ -81,7 +118,7 @@ export function DashboardJobWorkspaces({
               searchQuery
                 ? {
                     label: "Clear search",
-                    href: "/dashboard",
+                    href: dashboardJobsHref({ sort, dir }),
                   }
                 : undefined
             }
@@ -89,10 +126,13 @@ export function DashboardJobWorkspaces({
           <ArchivedJobsSection
             workspaces={archived}
             searchQuery={searchQuery}
-            clearSearchHref="/dashboard"
+            clearSearchHref={dashboardJobsHref({ sort, dir })}
+            dateField={dateField}
             viewAllHref={jobRoutes.list({
               status: "archived",
               q: searchQuery || undefined,
+              sort,
+              dir,
             })}
             viewAllLabel="View archived"
           />

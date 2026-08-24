@@ -26,10 +26,12 @@ export function JobTiles({
   workspaces,
   emptyMessage,
   emptyAction,
+  dateField = "updated_at",
 }: {
   workspaces: WorkspaceSummary[];
   emptyMessage?: string;
   emptyAction?: { label: string; href: string };
+  dateField?: "updated_at" | "created_at";
 }) {
   const router = useRouter();
   const { toast } = useToast();
@@ -194,7 +196,10 @@ export function JobTiles({
                   candidateCount={w.candidate_count}
                 />
                 <span className="ml-auto text-[11px] text-slate-400">
-                  Updated {timeAgo(w.updated_at)}
+                  {dateField === "created_at" ? "Created" : "Updated"}{" "}
+                  {timeAgo(
+                    dateField === "created_at" ? w.created_at : w.updated_at
+                  )}
                 </span>
               </div>
             </Card>

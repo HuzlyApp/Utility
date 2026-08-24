@@ -32,6 +32,18 @@ describe("jobRoutes", () => {
     );
     expect(jobRoutes.list({ status: "all", q: "JOB-1" })).toBe("/jobs?q=JOB-1");
   });
+
+  it("preserves job sort when switching status tabs", () => {
+    expect(
+      jobRoutes.list({ status: "active", sort: "created", dir: "desc" })
+    ).toBe("/jobs?status=active&sort=created");
+    expect(
+      jobRoutes.list({ status: "archived", q: "icu", sort: "created", dir: "asc" })
+    ).toBe("/jobs?status=archived&q=icu&sort=created&dir=asc");
+    expect(jobRoutes.list({ status: "all", sort: "updated", dir: "desc" })).toBe(
+      "/jobs"
+    );
+  });
 });
 
 describe("dashboardStatRoutes", () => {

@@ -87,6 +87,10 @@ export async function getWorkspace(
 export interface ListWorkspacesOptions {
   includeArchived?: boolean;
   search?: string;
+  /** `updated` (default) or `created`. */
+  sort?: "updated" | "created";
+  /** Newest first by default. */
+  dir?: "asc" | "desc";
   /** 1-based page; when set with pageSize, results are paginated. */
   page?: number;
   pageSize?: number;
@@ -115,6 +119,8 @@ export async function listWorkspacesPage(
   const tenantId = tenantIdOf(user);
   const searchPattern = toJobSearchPattern(opts?.search);
   const includeArchived = opts?.includeArchived ?? false;
+  const sortKey = opts?.sort === "created" ? "created" : "updated";
+  const sortDir = opts?.dir === "asc" ? "asc" : "desc";
   const pageSize =
     opts?.pageSize != null && opts.pageSize > 0
       ? Math.min(Math.floor(opts.pageSize), 100)
@@ -163,7 +169,12 @@ export async function listWorkspacesPage(
         OR w.specialty ILIKE ${searchPattern}
       )
     GROUP BY w.id
-    ORDER BY w.updated_at DESC
+    ORDER BY
+      CASE WHEN ${sortKey} = 'created' AND ${sortDir} = 'asc' THEN w.created_at END ASC NULLS LAST,
+      CASE WHEN ${sortKey} = 'created' AND ${sortDir} = 'desc' THEN w.created_at END DESC NULLS LAST,
+      CASE WHEN ${sortKey} = 'updated' AND ${sortDir} = 'asc' THEN w.updated_at END ASC NULLS LAST,
+      CASE WHEN ${sortKey} = 'updated' AND ${sortDir} = 'desc' THEN w.updated_at END DESC NULLS LAST,
+      w.id DESC
     LIMIT ${pageSize ?? 2147483647}
     OFFSET ${offset}
   `) as Array<Workspace & Record<string, unknown>>;

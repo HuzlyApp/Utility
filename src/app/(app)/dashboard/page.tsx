@@ -12,6 +12,10 @@ import { RecentAnalyses } from "@/components/dashboard/recent-analyses";
 import { redirect } from "next/navigation";
 import { candidateRoutes, dashboardStatRoutes } from "@/lib/routes";
 import { normalizeSearchQuery } from "@/lib/candidate-crm";
+import {
+  parseJobSortDirParam,
+  parseJobSortParam,
+} from "@/lib/workspace-lists";
 import { cn } from "@/lib/cn";
 
 export const dynamic = "force-dynamic";
@@ -104,12 +108,14 @@ function StatusTile({
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: { q?: string };
+  searchParams: { q?: string; sort?: string; dir?: string };
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
   const search = normalizeSearchQuery(searchParams.q);
+  const sort = parseJobSortParam(searchParams.sort);
+  const dir = parseJobSortDirParam(searchParams.dir);
 
   const [stats, statusTiles, workspaces, recent] = await Promise.all([
     getDashboardStats(user),
@@ -117,6 +123,8 @@ export default async function DashboardPage({
     listWorkspaces(user, {
       includeArchived: true,
       search: search || undefined,
+      sort,
+      dir,
     }),
     getRecentAnalyses(user),
   ]);
@@ -182,7 +190,13 @@ export default async function DashboardPage({
       </section>
 
       <div className="grid gap-6 lg:grid-cols-[1fr,320px]">
-        <DashboardJobWorkspaces workspaces={workspaces} searchQuery={search} />
+        <DashboardJobWorkspaces
+          workspaces={workspaces}
+          searchQuery={search}
+          dateField={sort === "created" ? "created_at" : "updated_at"}
+          sort={sort}
+          dir={dir}
+        />
         <section>
           <h2 className="mb-3 text-sm font-semibold text-slate-700">Recent Analyses</h2>
           <RecentAnalyses items={recent} />

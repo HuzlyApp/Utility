@@ -42,12 +42,14 @@ export function ArchivedJobsSection({
   clearSearchHref,
   viewAllHref,
   viewAllLabel = "View all",
+  dateField = "updated_at",
 }: {
   workspaces: WorkspaceSummary[];
   searchQuery?: string;
   clearSearchHref?: string;
   viewAllHref?: string;
   viewAllLabel?: string;
+  dateField?: "updated_at" | "created_at";
 }) {
   const searching = Boolean(searchQuery);
 
@@ -61,6 +63,7 @@ export function ArchivedJobsSection({
       />
       <JobTiles
         workspaces={workspaces}
+        dateField={dateField}
         emptyMessage={
           searching ? "No archived jobs match your search." : "No archived jobs."
         }
@@ -81,6 +84,7 @@ export function JobWorkspaceSections({
   showActive = true,
   showArchived = true,
   clearSearchHref,
+  dateField = "updated_at",
 }: {
   active: WorkspaceSummary[];
   archived: WorkspaceSummary[];
@@ -88,6 +92,7 @@ export function JobWorkspaceSections({
   showActive?: boolean;
   showArchived?: boolean;
   clearSearchHref?: string;
+  dateField?: "updated_at" | "created_at";
 }) {
   const searching = Boolean(searchQuery);
   const clearHref = clearSearchHref ?? jobRoutes.list();
@@ -102,6 +107,7 @@ export function JobWorkspaceSections({
           <SectionHeading title="Active Jobs" count={active.length} />
           <JobTiles
             workspaces={active}
+            dateField={dateField}
             emptyMessage={
               searching ? "No job workspaces match your search." : undefined
             }
@@ -115,6 +121,7 @@ export function JobWorkspaceSections({
           workspaces={archived}
           searchQuery={searchQuery}
           clearSearchHref={clearHref}
+          dateField={dateField}
         />
       ) : null}
     </div>

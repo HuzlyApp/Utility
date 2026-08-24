@@ -8,6 +8,10 @@ import {
 } from "@/lib/dal/workspaces";
 import { normalizeSearchQuery } from "@/lib/candidate-crm";
 import type { StructuredJobFields } from "@/lib/types";
+import {
+  parseJobSortDirParam,
+  parseJobSortParam,
+} from "@/lib/workspace-lists";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,6 +37,8 @@ export async function GET(req: NextRequest) {
     const result = await listWorkspacesPage(user, {
       includeArchived,
       search: search || undefined,
+      sort: parseJobSortParam(url.searchParams.get("sort")),
+      dir: parseJobSortDirParam(url.searchParams.get("dir")),
       page: pageSize ? page : undefined,
       pageSize,
     });

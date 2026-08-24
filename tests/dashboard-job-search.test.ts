@@ -28,6 +28,7 @@ describe("dashboard job workspace search UI", () => {
     expect(dashboard).toContain("includeArchived: true");
     expect(section).toContain("Job Workspaces");
     expect(section).toContain('placeholder="Search jobs by title or job code"');
+    expect(section).toContain("JobSortSelect");
     expect(section).toContain("ArchivedJobsSection");
     expect(section).toContain("View archived");
     expect(section).toContain("splitWorkspaces");
@@ -52,6 +53,8 @@ describe("workspace listing API search contract", () => {
     expect(route).toContain('url.searchParams.get("q")');
     expect(route).toContain('url.searchParams.get("page")');
     expect(route).toContain('url.searchParams.get("pageSize")');
+    expect(route).toContain('url.searchParams.get("sort")');
+    expect(route).toContain('url.searchParams.get("dir")');
     expect(route).toContain("withTenantUser");
     expect(route).toContain("listWorkspacesPage");
   });

@@ -11,7 +11,12 @@ export const jobRoutes = {
       | "active"
       | "archived"
       | "all"
-      | { status?: "active" | "archived" | "all"; q?: string }
+      | {
+          status?: "active" | "archived" | "all";
+          q?: string;
+          sort?: string;
+          dir?: string;
+        }
   ) => {
     const opts =
       typeof statusOrOpts === "string" || statusOrOpts == null
@@ -19,9 +24,13 @@ export const jobRoutes = {
         : statusOrOpts;
     const status = opts.status;
     const q = opts.q?.trim();
+    const sort = opts.sort?.trim();
+    const dir = opts.dir?.trim();
     const params = new URLSearchParams();
     if (status && status !== "all") params.set("status", status);
     if (q) params.set("q", q);
+    if (sort && sort !== "updated") params.set("sort", sort);
+    if (dir && dir !== "desc") params.set("dir", dir);
     const qs = params.toString();
     return qs ? `/jobs?${qs}` : "/jobs";
   },
