@@ -27,7 +27,8 @@ export const jobRoutes = {
     const sort = opts.sort?.trim();
     const dir = opts.dir?.trim();
     const params = new URLSearchParams();
-    if (status && status !== "all") params.set("status", status);
+    // Always persist an explicit tab so All is not collapsed into the Active default.
+    if (status) params.set("status", status);
     if (q) params.set("q", q);
     if (sort && sort !== "updated") params.set("sort", sort);
     if (dir && dir !== "desc") params.set("dir", dir);

@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { JobTiles } from "@/components/dashboard/job-tiles";
-import { jobRoutes } from "@/lib/routes";
+import { jobRoutes, type JobListStatus } from "@/lib/routes";
 import type { WorkspaceSummary } from "@/lib/dal/types";
+import { JOB_LIST_STATUS_HEADINGS } from "@/lib/workspace-lists";
 
 function SectionHeading({
   title,
@@ -77,36 +78,78 @@ export function ArchivedJobsSection({
   );
 }
 
+function emptyMessageForTab(
+  listStatus: JobListStatus,
+  searching: boolean
+): string | undefined {
+  if (searching) {
+    if (listStatus === "archived") return "No archived jobs match your search.";
+    if (listStatus === "active") return "No active jobs match your search.";
+    return "No job workspaces match your search.";
+  }
+  if (listStatus === "archived") return "No archived jobs.";
+  if (listStatus === "active") return "No active jobs.";
+  return undefined;
+}
+
+/**
+ * Tab-scoped job list: one heading/count matching Active / Archived / All.
+ * Prefer this on /jobs so CLOSED never appears under Active.
+ */
 export function JobWorkspaceSections({
-  active,
-  archived,
+  workspaces,
+  listStatus = "all",
   searchQuery = "",
-  showActive = true,
-  showArchived = true,
   clearSearchHref,
   dateField = "updated_at",
+  /** @deprecated Prefer `workspaces` + `listStatus`. Kept for dashboard split views. */
+  active,
+  archived,
+  showActive = true,
+  showArchived = true,
 }: {
-  active: WorkspaceSummary[];
-  archived: WorkspaceSummary[];
+  workspaces?: WorkspaceSummary[];
+  listStatus?: JobListStatus;
   searchQuery?: string;
-  showActive?: boolean;
-  showArchived?: boolean;
   clearSearchHref?: string;
   dateField?: "updated_at" | "created_at";
+  active?: WorkspaceSummary[];
+  archived?: WorkspaceSummary[];
+  showActive?: boolean;
+  showArchived?: boolean;
 }) {
   const searching = Boolean(searchQuery);
-  const clearHref = clearSearchHref ?? jobRoutes.list();
+  const clearHref = clearSearchHref ?? jobRoutes.list({ status: listStatus });
   const searchEmptyAction = searching
     ? { label: "Clear search", href: clearHref }
     : undefined;
 
+  // Canonical tab mode: single filtered list + matching heading.
+  if (workspaces) {
+    return (
+      <section>
+        <SectionHeading
+          title={JOB_LIST_STATUS_HEADINGS[listStatus]}
+          count={workspaces.length}
+        />
+        <JobTiles
+          workspaces={workspaces}
+          dateField={dateField}
+          emptyMessage={emptyMessageForTab(listStatus, searching)}
+          emptyAction={searching ? searchEmptyAction : undefined}
+        />
+      </section>
+    );
+  }
+
+  // Legacy split mode (dashboard): Active tiles + optional Archived section.
   return (
     <div className="space-y-8">
       {showActive ? (
         <section>
-          <SectionHeading title="Active Jobs" count={active.length} />
+          <SectionHeading title="Active Jobs" count={(active ?? []).length} />
           <JobTiles
-            workspaces={active}
+            workspaces={active ?? []}
             dateField={dateField}
             emptyMessage={
               searching ? "No job workspaces match your search." : undefined
@@ -118,7 +161,7 @@ export function JobWorkspaceSections({
 
       {showArchived ? (
         <ArchivedJobsSection
-          workspaces={archived}
+          workspaces={archived ?? []}
           searchQuery={searchQuery}
           clearSearchHref={clearHref}
           dateField={dateField}

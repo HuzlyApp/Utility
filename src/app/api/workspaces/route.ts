@@ -5,9 +5,11 @@ import {
   createWorkspace,
   listWorkspacesPage,
   type WorkspaceInput,
+  type WorkspaceListStatus,
 } from "@/lib/dal/workspaces";
 import { normalizeSearchQuery } from "@/lib/candidate-crm";
 import type { StructuredJobFields } from "@/lib/types";
+import { parseJobStatusParam } from "@/lib/routes";
 import {
   parseJobSortDirParam,
   parseJobSortParam,
@@ -20,12 +22,19 @@ interface CreateBody extends WorkspaceInput {
   structured_requirements?: StructuredJobFields;
 }
 
+function listStatusFromParam(raw: string | null): WorkspaceListStatus {
+  const status = parseJobStatusParam(raw);
+  if (status === "archived") return "archived";
+  if (status === "all") return "all";
+  return "active";
+}
+
 export async function GET(req: NextRequest) {
   return withTenantUser("workspaces.list", async (user) => {
     const url = new URL(req.url);
     const search = normalizeSearchQuery(url.searchParams.get("q") ?? "");
-    const status = (url.searchParams.get("status") ?? "active").toLowerCase();
-    const includeArchived = status === "archived" || status === "all";
+    const statusParam = url.searchParams.get("status");
+    const listStatus = listStatusFromParam(statusParam);
     const pageRaw = Number(url.searchParams.get("page") ?? "1");
     const pageSizeRaw = Number(url.searchParams.get("pageSize") ?? "0");
     const page = Number.isFinite(pageRaw) && pageRaw > 0 ? Math.floor(pageRaw) : 1;
@@ -35,7 +44,7 @@ export async function GET(req: NextRequest) {
         : undefined;
 
     const result = await listWorkspacesPage(user, {
-      includeArchived,
+      listStatus,
       search: search || undefined,
       sort: parseJobSortParam(url.searchParams.get("sort")),
       dir: parseJobSortDirParam(url.searchParams.get("dir")),
@@ -43,16 +52,12 @@ export async function GET(req: NextRequest) {
       pageSize,
     });
 
-    let items = result.items;
-    if (status === "archived") {
-      items = items.filter((w) => w.workspace_status === "ARCHIVED");
-    }
-
     return ok({
-      workspaces: items,
+      workspaces: result.items,
       total: result.total,
       page: result.page,
       pageSize: result.pageSize,
+      status: listStatus === "non_archived" ? "active" : listStatus,
       q: search || null,
     });
   });

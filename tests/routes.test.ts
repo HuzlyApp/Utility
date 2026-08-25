@@ -23,14 +23,16 @@ describe("jobRoutes", () => {
     expect(jobRoutes.list()).toBe("/jobs");
     expect(jobRoutes.list("active")).toBe("/jobs?status=active");
     expect(jobRoutes.list("archived")).toBe("/jobs?status=archived");
-    expect(jobRoutes.list("all")).toBe("/jobs");
+    expect(jobRoutes.list("all")).toBe("/jobs?status=all");
   });
 
   it("preserves search query when switching status tabs", () => {
     expect(jobRoutes.list({ status: "active", q: "icu" })).toBe(
       "/jobs?status=active&q=icu"
     );
-    expect(jobRoutes.list({ status: "all", q: "JOB-1" })).toBe("/jobs?q=JOB-1");
+    expect(jobRoutes.list({ status: "all", q: "JOB-1" })).toBe(
+      "/jobs?status=all&q=JOB-1"
+    );
   });
 
   it("preserves job sort when switching status tabs", () => {
@@ -41,7 +43,7 @@ describe("jobRoutes", () => {
       jobRoutes.list({ status: "archived", q: "icu", sort: "created", dir: "asc" })
     ).toBe("/jobs?status=archived&q=icu&sort=created&dir=asc");
     expect(jobRoutes.list({ status: "all", sort: "updated", dir: "desc" })).toBe(
-      "/jobs"
+      "/jobs?status=all"
     );
   });
 });
