@@ -11,7 +11,6 @@ import { normalizeSearchQuery } from "@/lib/candidate-crm";
 import {
   parseJobSortDirParam,
   parseJobSortParam,
-  splitWorkspaces,
 } from "@/lib/workspace-lists";
 import { cn } from "@/lib/cn";
 
@@ -35,13 +34,14 @@ export default async function JobsListPage({
   const search = normalizeSearchQuery(searchParams.q);
   const sort = parseJobSortParam(searchParams.sort);
   const dir = parseJobSortDirParam(searchParams.dir);
+  const listStatus =
+    status === "archived" ? "archived" : status === "all" ? "all" : "active";
   const workspaces = await listWorkspaces(user, {
-    includeArchived: true,
+    listStatus,
     search: search || undefined,
     sort,
     dir,
   });
-  const { active, archived } = splitWorkspaces(workspaces);
 
   return (
     <div className="space-y-6">
@@ -56,7 +56,7 @@ export default async function JobsListPage({
           </div>
           <h1 className="mt-1 text-2xl font-bold text-slate-900">Job Workspaces</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Browse active and archived job workspaces.
+            Browse active, closed, and archived job workspaces.
           </p>
         </div>
         <Link
@@ -105,11 +105,9 @@ export default async function JobsListPage({
       </div>
 
       <JobWorkspaceSections
-        active={active}
-        archived={archived}
+        workspaces={workspaces}
+        listStatus={status}
         searchQuery={search}
-        showActive={status !== "archived"}
-        showArchived
         dateField={sort === "created" ? "created_at" : "updated_at"}
         clearSearchHref={jobRoutes.list({ status, sort, dir })}
       />

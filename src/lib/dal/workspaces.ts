@@ -7,6 +7,7 @@ import type { StructuredJobFields } from "@/lib/types";
 import type { JobStatus, Workspace, WorkspaceSummary } from "./types";
 import { AuthError } from "@/lib/auth/session";
 import { toJobSearchPattern } from "@/lib/candidate-crm";
+import { normalizeJobStatus } from "@/lib/workspace-lists";
 
 export interface WorkspaceInput {
   job_ref?: string;
@@ -45,7 +46,7 @@ export async function createWorkspace(
       ${user.id}, ${tenantId}, ${input.job_ref ?? null}, ${input.job_title ?? null},
       ${input.msp_or_client ?? null}, ${input.specialty ?? null}, ${input.department ?? null},
       ${input.location ?? null}, ${input.shift ?? null}, ${input.start_date ?? null},
-      ${input.job_status ?? "OPEN"},
+      ${normalizeJobStatus(input.job_status) ?? "OPEN"},
       ${JSON.stringify(input.structured_requirements ?? {})},
       ${input.job_description_text ?? null}, ${input.job_description_quality ?? null}
     ) RETURNING id
@@ -84,8 +85,28 @@ export async function getWorkspace(
   return rows[0] ?? null;
 }
 
+/**
+ * Canonical workspace list filter.
+ * - `active`: not archived, job_status not CLOSED
+ * - `archived`: workspace_status ARCHIVED
+ * - `all`: every workspace for the tenant (no soft-delete column)
+ * - `non_archived`: workspace_status ACTIVE (includes CLOSED) — legacy default
+ */
+export type WorkspaceListStatus =
+  | "active"
+  | "archived"
+  | "all"
+  | "non_archived";
+
 export interface ListWorkspacesOptions {
+  /**
+   * When true and `listStatus` is omitted, loads archived + non-archived (`all`).
+   * When false/omitted and `listStatus` is omitted, loads `non_archived`
+   * (includes CLOSED) for backward-compatible callers such as candidate filters.
+   */
   includeArchived?: boolean;
+  /** Preferred filter; takes precedence over `includeArchived`. */
+  listStatus?: WorkspaceListStatus;
   search?: string;
   /** `updated` (default) or `created`. */
   sort?: "updated" | "created";
@@ -94,6 +115,11 @@ export interface ListWorkspacesOptions {
   /** 1-based page; when set with pageSize, results are paginated. */
   page?: number;
   pageSize?: number;
+}
+
+function resolveListStatus(opts?: ListWorkspacesOptions): WorkspaceListStatus {
+  if (opts?.listStatus) return opts.listStatus;
+  return opts?.includeArchived ? "all" : "non_archived";
 }
 
 export interface ListWorkspacesResult {
@@ -118,7 +144,7 @@ export async function listWorkspacesPage(
   const sql = getSql();
   const tenantId = tenantIdOf(user);
   const searchPattern = toJobSearchPattern(opts?.search);
-  const includeArchived = opts?.includeArchived ?? false;
+  const listStatus = resolveListStatus(opts);
   const sortKey = opts?.sort === "created" ? "created" : "updated";
   const sortDir = opts?.dir === "asc" ? "asc" : "desc";
   const pageSize =
@@ -131,11 +157,28 @@ export async function listWorkspacesPage(
       : 1;
   const offset = pageSize != null ? (page - 1) * pageSize : 0;
 
+  // Shared status predicate for list rows and COUNT(*) so totals never drift.
+  // Active excludes CLOSED (case-insensitive) and any archived workspace.
   const countRows = (await sql`
     SELECT COUNT(*)::int AS total
     FROM job_match_workspaces w
     WHERE w.tenant_id = ${tenantId}
-      AND (${includeArchived} OR w.workspace_status = 'ACTIVE')
+      AND (
+        ${listStatus}::text = 'all'
+        OR (
+          ${listStatus}::text = 'archived'
+          AND UPPER(COALESCE(w.workspace_status, '')) = 'ARCHIVED'
+        )
+        OR (
+          ${listStatus}::text = 'non_archived'
+          AND UPPER(COALESCE(w.workspace_status, 'ACTIVE')) = 'ACTIVE'
+        )
+        OR (
+          ${listStatus}::text = 'active'
+          AND UPPER(COALESCE(w.workspace_status, 'ACTIVE')) = 'ACTIVE'
+          AND UPPER(COALESCE(w.job_status, 'OPEN')) <> 'CLOSED'
+        )
+      )
       AND (
         ${searchPattern}::text IS NULL
         OR w.job_title ILIKE ${searchPattern}
@@ -158,7 +201,22 @@ export async function listWorkspacesPage(
     LEFT JOIN job_match_candidates jmc ON jmc.workspace_id = w.id
     LEFT JOIN candidate_match_analyses a ON a.id = jmc.latest_analysis_id
     WHERE w.tenant_id = ${tenantId}
-      AND (${includeArchived} OR w.workspace_status = 'ACTIVE')
+      AND (
+        ${listStatus}::text = 'all'
+        OR (
+          ${listStatus}::text = 'archived'
+          AND UPPER(COALESCE(w.workspace_status, '')) = 'ARCHIVED'
+        )
+        OR (
+          ${listStatus}::text = 'non_archived'
+          AND UPPER(COALESCE(w.workspace_status, 'ACTIVE')) = 'ACTIVE'
+        )
+        OR (
+          ${listStatus}::text = 'active'
+          AND UPPER(COALESCE(w.workspace_status, 'ACTIVE')) = 'ACTIVE'
+          AND UPPER(COALESCE(w.job_status, 'OPEN')) <> 'CLOSED'
+        )
+      )
       AND (
         ${searchPattern}::text IS NULL
         OR w.job_title ILIKE ${searchPattern}
@@ -199,6 +257,10 @@ export async function updateWorkspace(
   if (!existing) return false;
   const sql = getSql();
   const tenantId = tenantIdOf(user);
+  const nextJobStatus =
+    input.job_status != null
+      ? (normalizeJobStatus(input.job_status) ?? existing.job_status)
+      : existing.job_status;
   await sql`
     UPDATE job_match_workspaces SET
       job_ref = ${input.job_ref ?? existing.job_ref},
@@ -209,7 +271,7 @@ export async function updateWorkspace(
       location = ${input.location ?? existing.location},
       shift = ${input.shift ?? existing.shift},
       start_date = ${input.start_date ?? existing.start_date},
-      job_status = ${input.job_status ?? existing.job_status},
+      job_status = ${nextJobStatus},
       structured_requirements = ${JSON.stringify(
         input.structured_requirements ?? existing.structured_requirements
       )},
@@ -224,6 +286,14 @@ export async function updateWorkspace(
     entityType: "job_workspace",
     entityId: id,
     action: "WORKSPACE_UPDATED",
+    previousValue:
+      nextJobStatus !== existing.job_status
+        ? { job_status: existing.job_status }
+        : undefined,
+    newValue:
+      nextJobStatus !== existing.job_status
+        ? { job_status: nextJobStatus }
+        : undefined,
   });
   await logActivity({
     tenantId,
@@ -417,7 +487,10 @@ export async function getDashboardStats(user: AppUser): Promise<DashboardStats> 
     )
     SELECT
       (SELECT COUNT(*) FROM job_match_workspaces
-        WHERE tenant_id = ${tenantId} AND workspace_status = 'ACTIVE') AS active_jobs,
+        WHERE tenant_id = ${tenantId}
+          AND UPPER(COALESCE(workspace_status, 'ACTIVE')) = 'ACTIVE'
+          AND UPPER(COALESCE(job_status, 'OPEN')) <> 'CLOSED'
+      ) AS active_jobs,
       (SELECT COUNT(*) FROM candidates WHERE tenant_id = ${tenantId}) AS total_candidates,
       (SELECT COUNT(*) FROM latest WHERE match_category = 'STRONG_MATCH') AS strong_matches,
       (SELECT COUNT(*) FROM latest WHERE submission_readiness = 'VERIFY_BEFORE_SUBMISSION') AS needs_verification,

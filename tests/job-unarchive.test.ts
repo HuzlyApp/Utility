@@ -71,8 +71,9 @@ describe("job unarchive", () => {
 
     expect(sections).toContain('title="Archived Jobs"');
     expect(sections).toContain('title="Active Jobs"');
+    expect(sections).toContain("JOB_LIST_STATUS_HEADINGS");
     expect(jobsPage).toContain("JobWorkspaceSections");
-    expect(jobsPage).toContain("showArchived");
+    expect(jobsPage).toContain("listStatus");
     expect(dashboard).toContain("ArchivedJobsSection");
   });
 });
